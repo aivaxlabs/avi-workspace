@@ -1,0 +1,42 @@
+.connections-page {
+  height: 100%; overflow: auto; padding: 48px clamp(24px, 6vw, 96px); background: --background-primary;
+  > .connections-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; max-width: 1180px; margin: 0 auto 32px;
+    h1 { margin: 12px 0 4px; font-size: 28px; font-weight: 620; }
+    p { margin: 0; color: --text-secondary; }
+    button { min-height: 38px; padding: 0 16px; border-radius: 7px; }
+  }
+  > .connection-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1px; max-width: 1180px; margin: auto; background: --border-color; border: 1px solid --border-color; border-radius: 8px; overflow: hidden; }
+}
+.wordmark { color: --primary-color; font: 700 11px/1 --font-code; letter-spacing: .22em; }
+.connection-card { min-height: 190px; display: flex; flex-direction: column; padding: 20px; background: --background-secondary;
+  > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+    h2 { margin: 0 0 6px; font-size: --font-md; font-weight: 620; }
+    code { display: block; max-width: 210px; color: --text-secondary; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  }
+  > p { flex: 1; color: --text-secondary; font-size: --font-xs; }
+  > footer { display: flex; gap: 6px;
+    button { min-width: 34px; height: 34px; border-radius: 6px; background: transparent; }
+    button:hover { background: --item-hover; }
+    button.primary { margin-right: auto; padding: 0 12px; background: --primary-color; }
+    button.primary:hover { background: --primary-color; }
+    .danger-quiet { color: --danger-color; }
+  }
+}
+.connection-status { display: inline-flex; align-items: center; gap: 6px; color: --text-secondary; font-size: 11px; text-transform: capitalize;
+  > i { width: 7px; height: 7px; border: 1px solid currentColor; border-radius: 50%; }
+  &.online { color: --success-color; } &.online > i { background: currentColor; }
+  &.offline { color: --danger-color; }
+  &.checking > i { animation: pulse 1s ease infinite; }
+}
+@keyframes pulse { 50% { opacity: .25; } }
+.empty-connections { grid-column: 1 / -1; min-height: 260px; display: grid; place-content: center; justify-items: center; padding: 40px; background: --background-secondary; text-align: center;
+  > i { color: --text-muted; font-size: 28px; } h2 { margin: 16px 0 6px; font-size: --font-lg; } p { max-width: 390px; margin: 0; color: --text-secondary; }
+}
+.modal-backdrop { position: fixed; inset: 0; display: grid; place-items: center; padding: 20px; background: rgb(0 0 0 / .58); }
+.connection-dialog { width: min(480px, 100%); padding: 22px; border: 1px solid --border-color; border-radius: 9px; background: --background-elevated; box-shadow: 0 22px 70px rgb(0 0 0 / .35);
+  > header { display: flex; justify-content: space-between; gap: 18px; margin-bottom: 20px; h2 { margin: 0 0 4px; font-size: --font-xl; } p { margin: 0; color: --text-secondary; font-size: --font-xs; } button { width: 34px; height: 34px; background: transparent; } }
+  > label { display: grid; gap: 7px; margin-top: 14px; color: --text-secondary; font-size: --font-xs; input { height: 38px; padding: 0 11px; border: 1px solid --border-color; border-radius: 6px; background: --background-primary; } }
+  > footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px; button { height: 36px; padding: 0 14px; border-radius: 6px; background: --item-hover; } button.primary { background: --primary-color; } }
+}
+@media (max-width: 520px) { .connections-page { padding: 28px 16px; > .connections-header { align-items: stretch; gap: 16px; margin-bottom: 20px; > div { min-width: 0; } button { align-self: flex-start; } } > .connection-grid { grid-template-columns: minmax(0, 1fr); } } .empty-connections { min-width: 0; padding: 30px 18px; p { max-width: 100%; } } .modal-backdrop { padding: calc(12px + env(safe-area-inset-top)) 12px calc(12px + env(safe-area-inset-bottom)); } .connection-dialog { max-height: 100%; overflow: auto; padding: 18px; border-radius: 14px; } }
+@media (max-width: 380px) { .connections-page > .connections-header { flex-direction: column; } .modal-backdrop { padding: 10px; } }
