@@ -3670,11 +3670,11 @@ h1, h2, h3, h4, h5, h6, strong, b, th {
     }
 
     .conversation-scroll {
-        padding: 22px 12px calc(var(--composer-clearance, 134px) + 54px + env(safe-area-inset-bottom));
+        padding: 22px 12px calc(var(--composer-clearance, 134px) + 24px + var(--safe-bottom));
     }
 
     .scroll-to-bottom {
-        bottom: calc(var(--composer-clearance, 134px) + 20px + env(safe-area-inset-bottom));
+        bottom: calc(var(--composer-clearance, 134px) + 16px + var(--safe-bottom));
     }
 
     .mobile-overlay-backdrop {
@@ -3847,14 +3847,6 @@ h1, h2, h3, h4, h5, h6, strong, b, th {
     .mobile-drawer .sidebar .section-heading > button, .mobile-drawer .sidebar .folder-heading > button {
         min-width: 44px;
         min-height: 44px;
-    }
-
-    .conversation-scroll {
-        padding-bottom: calc(var(--composer-clearance, 134px) + 24px + var(--safe-bottom));
-    }
-
-    .scroll-to-bottom {
-        bottom: calc(var(--composer-clearance, 134px) + 16px + var(--safe-bottom));
     }
 
     .empty-chat {
