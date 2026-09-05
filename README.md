@@ -160,4 +160,15 @@ bunx wrangler@4.129.0 deploy
 
 The deploying account must have access to the `aivax.net` zone. For a fork, change the Worker name and custom domain in `wrangler.jsonc` before deploying. Upload only `dist/`, never the repository, credentials, or local configuration. The existing production CSP remains part of the generated HTML.
 
-Deployment is manual; pushing to GitHub does not automatically deploy the site. The installed PWA caches the application shell, not remote conversations. When a new version is available, use its update prompt to reload.
+### Automatic deployment
+
+Cloudflare Workers Builds is connected to `aivaxlabs/avi-workspace`. Every push to `main` triggers a production build and deployment to `https://workspace.aivax.net`. Other branches do not deploy to production.
+
+- Runtime: Bun `1.3.14`.
+- Build command: `bun install --frozen-lockfile && bun test && bun scripts/test-relay-e2e.mjs && bun run build`.
+- Deploy command: `bunx wrangler@4.129.0 deploy`.
+- Root directory: `/`.
+
+The Git integration and build credential are managed in Cloudflare, not stored in this repository. Check the Worker's **Builds** page for deployment status and logs. Failed tests or builds prevent deployment. The manual commands above remain available for operator-driven deployments.
+
+The installed PWA caches the application shell, not remote conversations. When a new version is available, use its update prompt to reload.
