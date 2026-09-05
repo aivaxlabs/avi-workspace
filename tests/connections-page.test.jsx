@@ -64,7 +64,7 @@ describe('ConnectionsPage', () => {
       expect(document.activeElement?.getAttribute('aria-label')).toBe('Close');
       expect(root.querySelector('[autofocus]')).toBeNull();
       const url = root.querySelector('[name="serverUrl"]');
-      expect(url.type).toBe('url');
+      expect(url.type).toBe('text');
       expect(url.getAttribute('inputmode')).toBe('url');
       expect(url.getAttribute('autocapitalize')).toBe('none');
       expect(root.querySelector('[name="apiKey"]').getAttribute('enterkeyhint')).toBe('go');
