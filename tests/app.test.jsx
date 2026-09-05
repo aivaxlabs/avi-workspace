@@ -145,6 +145,50 @@ async function openWorkspace() {
 }
 
 describe('App connections and workspace lifecycle', () => {
+  test('tracks the visual viewport without relaying out pinch zoom and removes listeners on unmount', async () => {
+    const original = Object.getOwnPropertyDescriptor(window, 'visualViewport');
+    const viewport = new window.EventTarget();
+    Object.assign(viewport, { height: window.innerHeight, offsetTop: 0, scale: 1 });
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+    const style = document.documentElement.style;
+    try {
+      await renderApp();
+      expect(style.getPropertyValue('--app-height')).toBe(`${window.innerHeight}px`);
+      viewport.height = window.innerHeight - 300;
+      viewport.offsetTop = 24;
+      act(() => viewport.dispatchEvent(new window.Event('resize')));
+      expect(style.getPropertyValue('--app-height')).toBe(`${window.innerHeight - 300}px`);
+      expect(style.getPropertyValue('--app-offset-top')).toBe('24px');
+      expect(style.getPropertyValue('--keyboard-inset')).toBe('300px');
+      viewport.offsetTop = 40;
+      act(() => viewport.dispatchEvent(new window.Event('scroll')));
+      expect(style.getPropertyValue('--app-offset-top')).toBe('40px');
+      viewport.scale = 2;
+      viewport.height = 200;
+      act(() => viewport.dispatchEvent(new window.Event('resize')));
+      expect(style.getPropertyValue('--app-height')).toBe(`${window.innerHeight - 300}px`);
+      viewport.scale = 1;
+      viewport.height = window.innerHeight;
+      viewport.offsetTop = 0;
+      act(() => window.dispatchEvent(new window.Event('resize')));
+      expect(style.getPropertyValue('--app-height')).toBe(`${window.innerHeight}px`);
+      expect(style.getPropertyValue('--app-offset-top')).toBe('0px');
+      expect(style.getPropertyValue('--keyboard-inset')).toBe('0px');
+      act(() => render(null, root));
+      act(() => {
+        viewport.dispatchEvent(new window.Event('resize'));
+        viewport.dispatchEvent(new window.Event('scroll'));
+        window.dispatchEvent(new window.Event('resize'));
+      });
+      expect(style.getPropertyValue('--app-height')).toBe('');
+      expect(style.getPropertyValue('--app-offset-top')).toBe('');
+      expect(style.getPropertyValue('--keyboard-inset')).toBe('');
+    } finally {
+      if (original) Object.defineProperty(window, 'visualViewport', original);
+      else delete window.visualViewport;
+    }
+  });
+
   test('account approval lists relay devices before opening independent global and conversation consumers', async () => {
     const originalFetch = globalThis.fetch;
     const tickets = [];

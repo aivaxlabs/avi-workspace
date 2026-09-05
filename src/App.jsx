@@ -41,6 +41,28 @@ export function App() {
   const probes = useRef(new Map());
   const workspaceMemory = useRef(new Map());
 
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+    const style = document.documentElement.style;
+    const syncViewport = () => {
+      if (viewport.scale !== 1) return;
+      style.setProperty('--app-height', `${viewport.height}px`);
+      style.setProperty('--app-offset-top', `${viewport.offsetTop}px`);
+      style.setProperty('--keyboard-inset', `${Math.max(0, window.innerHeight - viewport.height)}px`);
+    };
+    syncViewport();
+    viewport.addEventListener('resize', syncViewport);
+    viewport.addEventListener('scroll', syncViewport);
+    window.addEventListener('resize', syncViewport);
+    return () => {
+      viewport.removeEventListener('resize', syncViewport);
+      viewport.removeEventListener('scroll', syncViewport);
+      window.removeEventListener('resize', syncViewport);
+      for (const property of ['--app-height', '--app-offset-top', '--keyboard-inset']) style.removeProperty(property);
+    };
+  }, []);
+
   async function check(connection) {
     const previous = probes.current.get(connection.id);
     previous?.close();

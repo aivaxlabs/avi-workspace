@@ -104,7 +104,8 @@ export function ConnectionsPage({ statuses, onEnter, onCheck, onCancelOpen, open
   useEffect(() => { connections.forEach(onCheck); }, [connections]);
   useEffect(() => {
     if (!form) return;
-    requestAnimationFrame(() => dialogRef.current?.querySelector('input')?.focus());
+    const frame = requestAnimationFrame(() => dialogRef.current?.querySelector(window.matchMedia('(pointer: coarse)').matches ? 'button' : 'input')?.focus({ preventScroll: true }));
+    return () => cancelAnimationFrame(frame);
   }, [Boolean(form)]);
 
   function openForm(value) {
@@ -180,7 +181,7 @@ export function ConnectionsPage({ statuses, onEnter, onCheck, onCancelOpen, open
         finally { setAivaxBusy(false); }
       }}>
         <header><div><h2>{accessToken ? 'Connected Avi devices' : 'Login with AIVAX'}</h2><p>Approve this account to save its access key in this browser and automatically list all remote instances whenever you open Avi Workspace.</p></div><button type="button" aria-label="Close AIVAX" onClick={closeAivax}><i class="ri-close-line" /></button></header>
-        {!accessToken && !accountToken && <label>Login key<input type="password" name="loginKey" autoComplete="off" required value={loginKey} disabled={aivaxBusy} onInput={(event) => setLoginKey(event.currentTarget.value)} /></label>}
+        {!accessToken && !accountToken && <label>Login key<input type="password" name="loginKey" autoComplete="off" autoCapitalize="none" spellcheck={false} enterKeyHint="go" required value={loginKey} disabled={aivaxBusy} onInput={(event) => setLoginKey(event.currentTarget.value)} /></label>}
         {aivaxError && <p role="alert" class="error-banner">{aivaxError}</p>}
         <div aria-live="polite" aria-busy={aivaxBusy}>
           {aivaxBusy && <p>Loading connected devices...</p>}
@@ -206,9 +207,9 @@ export function ConnectionsPage({ statuses, onEnter, onCheck, onCancelOpen, open
     }} onMouseDown={(event) => event.target === event.currentTarget && closeForm()}>
       <form ref={dialogRef} class="connection-dialog" role="dialog" aria-modal="true" onSubmit={submit} aria-label={form.id ? 'Edit connection' : 'Add connection'}>
         <header><div><h2>{form.id ? 'Edit connection' : 'Add connection'}</h2><p>The API key is stored in IndexedDB and sent only during the WebSocket handshake.</p></div><button type="button" aria-label="Close" onClick={closeForm}><i class="ri-close-line" /></button></header>
-        <label>Name<input autofocus value={form.label} onInput={(event) => setForm({ ...form, label: event.currentTarget.value })} placeholder="Development Avi" /></label>
-        <label>Remote Avi URL<input name="serverUrl" required aria-invalid={formError.includes('URL') || undefined} aria-describedby={formError ? 'connection-form-error' : undefined} value={form.serverUrl} onInput={(event) => setForm({ ...form, serverUrl: event.currentTarget.value })} placeholder="http://127.0.0.1:18992" /></label>
-        <label>API key<input required type="password" aria-describedby={formError ? 'connection-form-error' : undefined} value={form.apiKey} onInput={(event) => setForm({ ...form, apiKey: event.currentTarget.value })} autocomplete="off" /></label>
+        <label>Name<input name="label" autoComplete="off" enterKeyHint="next" value={form.label} onInput={(event) => setForm({ ...form, label: event.currentTarget.value })} placeholder="Development Avi" /></label>
+        <label>Remote Avi URL<input type="url" inputMode="url" name="serverUrl" autoComplete="url" autoCapitalize="none" spellcheck={false} enterKeyHint="next" required aria-invalid={formError.includes('URL') || undefined} aria-describedby={formError ? 'connection-form-error' : undefined} value={form.serverUrl} onInput={(event) => setForm({ ...form, serverUrl: event.currentTarget.value })} placeholder="http://127.0.0.1:18992" /></label>
+        <label>API key<input required type="password" name="apiKey" autoCapitalize="none" spellcheck={false} enterKeyHint="go" aria-describedby={formError ? 'connection-form-error' : undefined} value={form.apiKey} onInput={(event) => setForm({ ...form, apiKey: event.currentTarget.value })} autocomplete="off" /></label>
         {formError && <p id="connection-form-error" class="error-banner" role="alert">{formError}</p>}
         <footer><button type="button" onClick={closeForm}>Cancel</button><button type="submit" class="primary" disabled={saving}>{saving ? 'Saving...' : 'Save connection'}</button></footer>
       </form>
