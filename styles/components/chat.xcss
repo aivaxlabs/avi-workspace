@@ -143,13 +143,11 @@
   .permission-control, .composer-meta { display: none; }
   .model-chip { min-width: 0; max-width: min(190px, calc(100vw - 116px)); height: 40px; padding-inline: 8px; }
   .mode-chip { height: 40px; padding-inline: 8px; }
-  .composer-menu, .command-picker { position: fixed; z-index: 50; top: calc(var(--app-offset-top) + env(safe-area-inset-top) + (var(--app-height) - env(safe-area-inset-top) - var(--safe-bottom)) / 2); right: auto; bottom: auto; left: 50%; width: min(360px, calc(100vw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right))); min-width: 0; max-height: calc(var(--app-height) - 24px - env(safe-area-inset-top) - var(--safe-bottom)); overflow: auto; transform: translate(-50%, -50%); > button { min-height: 44px; } }
-  .plus-menu { width: min(360px, calc(100vw - 24px)); }
+  .composer-menu, .command-picker { position: absolute; z-index: 50; top: auto; right: 0; bottom: calc(100% + 8px); left: 0; width: 100%; min-width: 0; max-height: max(44px, calc(var(--app-height) - var(--composer-clearance, 134px) - env(safe-area-inset-top) - var(--safe-bottom) - 76px)); overflow: auto; overscroll-behavior: contain; transform: none; > button { min-height: 44px; } }
   .mobile-permission-label { display: block; }
   .mobile-permission-options { display: block; > button { width: 100%; min-height: 44px; display: flex; align-items: center; gap: 9px; padding: 7px 9px; border-radius: 7px; background: transparent; color: --text-secondary; text-align: left; &:hover, &[aria-checked="true"] { background: --item-hover; color: --text-primary; } > span { min-width: 0; flex: 1; display: grid; gap: 2px; > strong { font-weight: 500; } > small { color: --text-muted; font-size: 10px; } } } }
-  .model-menu-holder, .model-submenu-holder { position: static; }
-  .model-menu { width: min(360px, calc(100vw - 24px)); overflow: visible; }
-  .model-reasoning-submenu, .effort-submenu { position: absolute; z-index: 1; top: 0; right: 0; bottom: auto; left: 0; width: 100%; max-height: calc(var(--app-height) - 24px - env(safe-area-inset-top) - var(--safe-bottom)); overflow: auto; transform: none; }
+  .composer-menu-holder, .model-submenu-holder { position: static; }
+  .model-reasoning-submenu, .effort-submenu { position: static; width: 100%; max-height: none; margin-block: 4px; border: 0; box-shadow: none; transform: none; }
   .model-reasoning-trigger { min-height: 44px; }
   .advanced-menu-header { min-height: 42px; }
 }

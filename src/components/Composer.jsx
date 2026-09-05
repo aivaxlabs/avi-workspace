@@ -227,6 +227,10 @@ export function Composer({ client, state, models, discovery, draftCache, message
     const submenu = modelSubmenu === 'model' ? modelSubmenuRef.current : effortSubmenuRef.current;
     if (!holder || !submenu) return undefined;
     const position = () => {
+      if (window.matchMedia('(max-width: 640px)').matches) {
+        for (const property of ['right', 'left', 'top']) submenu.style.removeProperty(property);
+        return;
+      }
       const holderRect = holder.getBoundingClientRect();
       const width = submenu.offsetWidth;
       const height = submenu.offsetHeight;
