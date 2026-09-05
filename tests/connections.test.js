@@ -12,6 +12,19 @@ describe('connection-only IndexedDB storage', () => {
     expect((await listConnections(indexedDB))[0].apiKey).toBe('key');
   });
 
+  test('creates independent records when a new form supplies an empty id', async () => {
+    const first = await saveConnection({ id: '', label: 'First', serverUrl: 'localhost:18991', apiKey: 'synthetic' }, indexedDB);
+    const second = await saveConnection({ id: '', label: 'Second', serverUrl: 'localhost:18992', apiKey: 'synthetic' }, indexedDB);
+    expect(first.id.length).toBeGreaterThan(0);
+    expect(second.id).not.toBe(first.id);
+    expect(await listConnections(indexedDB)).toHaveLength(2);
+    const updated = await saveConnection({ ...first, label: 'Edited' }, indexedDB);
+    expect(updated.createdAt).toBe(first.createdAt);
+    expect(await listConnections(indexedDB)).toHaveLength(2);
+    await deleteConnection(second.id, indexedDB);
+    expect((await listConnections(indexedDB)).map((item) => item.label)).toEqual(['Edited']);
+  });
+
   test('rejects messages, drafts, layout, and other remote state', async () => {
     await expect(saveConnection({ serverUrl: 'localhost:18992', apiKey: 'key', messages: [] }, indexedDB)).rejects.toThrow('unsupported fields');
     await expect(saveConnection({ serverUrl: 'localhost:18992', apiKey: 'key', theme: 'dark' }, indexedDB)).rejects.toThrow('unsupported fields');

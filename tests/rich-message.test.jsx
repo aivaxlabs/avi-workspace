@@ -13,16 +13,47 @@ Object.assign(globalThis, {
 });
 
 let RichMessage;
+let METHODS;
 
 beforeAll(async () => {
   ({ RichMessage } = await import('../src/components/RichMessage.jsx'));
+  ({ METHODS } = await import('../src/rpc/contracts.js'));
 });
+
+const FULL_DISCOVERY = () => ({ appVersion: 'test', apiVersion: 1, methods: Object.values(METHODS) });
 
 afterEach(() => {
   document.body.replaceChildren();
 });
 
 describe('RichMessage', () => {
+  test('copies answer text without reasoning and forks through the selected message', async () => {
+    const root = document.createElement('div'); document.body.append(root);
+    const copied = [];
+    const forks = [];
+    const original = navigator.clipboard.writeText;
+    navigator.clipboard.writeText = async (text) => { copied.push(text); };
+    try {
+      act(() => render(h(RichMessage, { message: { id: 'reply-1', role: 'assistant', status: 'completed', content: '<think>Private reasoning</think>Final **answer**' }, client: {}, discovery: FULL_DISCOVERY(), onFork: async (id) => { forks.push(id); } }), root));
+      await act(async () => { root.querySelector('[aria-label="Copy response"]').click(); });
+      expect(copied).toEqual(['Final **answer**']);
+      expect(root.querySelector('[role="status"]').textContent).toBe('Copied');
+      await act(async () => { root.querySelector('[aria-label="Fork chat from this response"]').click(); });
+      expect(forks).toEqual(['reply-1']);
+    } finally { navigator.clipboard.writeText = original; act(() => render(null, root)); }
+  });
+
+  test('reports clipboard failure and disables unavailable forking', async () => {
+    const root = document.createElement('div'); document.body.append(root);
+    const original = navigator.clipboard.writeText;
+    navigator.clipboard.writeText = async () => { throw new Error('Denied'); };
+    try {
+      act(() => render(h(RichMessage, { message: { id: 'reply-2', role: 'assistant', content: 'Answer' }, client: {}, discovery: FULL_DISCOVERY() }), root));
+      expect(root.querySelector('[aria-label="Fork chat from this response"]').disabled).toBe(true);
+      await act(async () => { root.querySelector('[aria-label="Copy response"]').click(); });
+      expect(root.querySelector('[role="alert"]').textContent).toContain('clipboard permissions');
+    } finally { navigator.clipboard.writeText = original; act(() => render(null, root)); }
+  });
   test('renders Desktop-style attachment pills and media thumbnails outside the user bubble', () => {
     const root = document.createElement('div');
     document.body.append(root);
@@ -38,7 +69,7 @@ describe('RichMessage', () => {
       ],
     };
 
-    act(() => render(h(RichMessage, { message, client: { request() {} } }), root));
+    act(() => render(h(RichMessage, { message, client: { request() {} }, discovery: FULL_DISCOVERY() }), root));
 
     const bubble = root.querySelector('.user-bubble');
     const attachments = root.querySelector('.attachment-list');
@@ -74,7 +105,7 @@ describe('RichMessage', () => {
       return new Promise((resolve) => { resolveDetails = resolve; });
     } };
 
-    act(() => render(h(RichMessage, { message, client }), root));
+    act(() => render(h(RichMessage, { message, client, discovery: FULL_DISCOVERY() }), root));
     act(() => root.querySelector('.thinking-summary').click());
 
     const tools = [...root.querySelectorAll('.tool-line')];
@@ -106,7 +137,7 @@ describe('RichMessage', () => {
       segments: [{ id: 'tool-error', messageId: 'assistant-error', type: 'tool-call', name: 'read_file', detailsAvailable: true, hasResult: true }],
     };
 
-    act(() => render(h(RichMessage, { message, client }), root));
+    act(() => render(h(RichMessage, { message, client, discovery: FULL_DISCOVERY() }), root));
     act(() => root.querySelector('.thinking-summary').click());
     const tool = root.querySelector('.tool-line');
     act(() => tool.click());
@@ -115,6 +146,42 @@ describe('RichMessage', () => {
     act(() => tool.click());
     act(() => tool.click());
     expect(requests).toBe(2);
+  });
+
+  test('keeps grouped sub-agent and other-agent messages minimized in the assistant worked block', () => {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const message = {
+      id: 'assistant-final',
+      role: 'assistant',
+      status: 'completed',
+      createdAt: '2026-09-01T10:00:10.000Z',
+      updatedAt: '2026-09-01T10:00:14.000Z',
+      content: 'Final answer.',
+    };
+    const workedMessages = [
+      { id: 'other-agent', role: 'user', fromAgent: true, content: 'Other-agent update.' },
+      { id: 'sub-agent', role: 'user', content: '<subagent_report thread_id="thread-1" title="Research">Sub-agent result.</subagent_report>' },
+    ];
+
+    act(() => render(h(RichMessage, {
+      message,
+      workedMessages,
+      workedStartedAt: '2026-09-01T10:00:00.000Z',
+      client: { request() {} },
+    }), root));
+
+    expect(root.textContent).toContain('Worked for 14 seconds');
+    expect(root.textContent).toContain('Final answer.');
+    expect(root.textContent).not.toContain('Other-agent update.');
+    expect(root.textContent).not.toContain('Sub-agent result.');
+
+    act(() => root.querySelector('.worked-summary').click());
+    expect(root.textContent).toContain('Other-agent update.');
+    expect(root.textContent).toContain('Research');
+    expect(root.textContent).toContain('Sub-agent result.');
+    expect(root.textContent).not.toContain('<subagent_report');
+    expect(root.querySelector('[aria-label="Report from Research"]')).not.toBeNull();
   });
 
   test('mounts and expands canonical reasoning and pending/completed/error tools', () => {
@@ -139,7 +206,7 @@ describe('RichMessage', () => {
       ],
     };
 
-    act(() => render(h(RichMessage, { message, client: { request() {} } }), root));
+    act(() => render(h(RichMessage, { message, client: { request() {} }, discovery: FULL_DISCOVERY() }), root));
 
     expect(root.textContent).toContain('Worked for 14 seconds');
     expect(root.textContent).toContain('Final answer.');

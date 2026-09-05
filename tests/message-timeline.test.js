@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { buildMessageTimeline, formatWorkedDuration, operationGroupHasTools, operationGroupLabel, partitionMessageTimeline } from '../src/lib/message-timeline.js';
+import { buildMessageTimeline, formatWorkedDuration, groupAssistantTurns, operationGroupHasTools, operationGroupLabel, parseStructuredAgentMessage, partitionMessageTimeline } from '../src/lib/message-timeline.js';
 
 describe('assistant message timeline', () => {
   test('uses canonical content segments without duplicating aggregate message content', () => {
@@ -60,6 +60,41 @@ describe('assistant message timeline', () => {
     expect(operationGroupLabel(errors)).toBe('Details');
     expect(operationGroupHasTools(errors)).toBeFalse();
     expect(operationGroupHasTools([{ type: 'tool-call', name: 'read_file' }])).toBeTrue();
+  });
+
+  test('groups sub-agent and other-agent messages into the final assistant turn', () => {
+    const messages = [
+      { id: 'human', role: 'user', content: 'Investigate.' },
+      { id: 'assistant-working', role: 'assistant', createdAt: '2026-09-01T10:00:00.000Z', content: 'Working.' },
+      { id: 'other-agent', role: 'user', fromAgent: true, content: 'Agent update.' },
+      { id: 'sub-agent', role: 'user', content: '<subagent_report thread_id="thread-1" title="Research">Sub-agent result.</subagent_report>' },
+      { id: 'cross-thread', role: 'user', content: '<cross-message from_thread_id="thread-2">Cross-thread update.</cross-message>' },
+      { id: 'assistant-final', role: 'assistant', content: 'Final answer.' },
+      { id: 'next-human', role: 'user', content: 'Thanks.' },
+    ];
+
+    expect(groupAssistantTurns(messages)).toEqual([
+      { message: messages[0], workedMessages: [] },
+      {
+        message: messages[5],
+        workedMessages: messages.slice(1, 5),
+        workedStartedAt: '2026-09-01T10:00:00.000Z',
+      },
+      { message: messages[6], workedMessages: [] },
+    ]);
+  });
+
+  test('parses valid structured agent messages and rejects malformed envelopes', () => {
+    expect(parseStructuredAgentMessage({ role: 'user', content: '<subagent_report title="Research" thread_id="thread-1">Result.</subagent_report>' })).toEqual({
+      type: 'subagent-report', threadId: 'thread-1', title: 'Research', body: 'Result.',
+    });
+    expect(parseStructuredAgentMessage({ role: 'user', content: '<cross-message from_thread_id="thread-2">Update.</cross-message>' })).toEqual({
+      type: 'cross-thread-message', sourceThreadId: 'thread-2', body: 'Update.',
+    });
+
+    const malformed = { id: 'malformed', role: 'user', content: '<subagent_report>Missing identity.</subagent_report>' };
+    expect(parseStructuredAgentMessage(malformed)).toBeNull();
+    expect(groupAssistantTurns([malformed])).toEqual([{ message: malformed, workedMessages: [] }]);
   });
 
   test('formats Desktop-style worked duration labels', () => {

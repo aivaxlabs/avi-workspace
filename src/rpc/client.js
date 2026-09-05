@@ -1,5 +1,6 @@
 import { RPC_PROTOCOL } from './contracts.js';
 import { createAuthProtocols } from './url.js';
+import { RelaySocket } from './relay-socket.js';
 
 export class RpcError extends Error {
   constructor(message, code, data) {
@@ -11,10 +12,14 @@ export class RpcError extends Error {
 }
 
 export class RpcClient extends EventTarget {
-  constructor({ url, apiKey, timeoutMs = 15_000, reconnect = true, WebSocketImpl = globalThis.WebSocket }) {
+  constructor({ url, apiKey, relay = null, path = '/rpc', timeoutMs = 15_000, reconnect = true, WebSocketImpl = globalThis.WebSocket }) {
     super();
     this.url = url;
-    this.protocols = createAuthProtocols(apiKey);
+    this.relay = relay;
+    this.apiKey = apiKey;
+    this.path = path;
+    this.stableTimer = null;
+    this.protocols = this.relay ? null : createAuthProtocols(apiKey);
     this.timeoutMs = timeoutMs;
     this.reconnect = reconnect;
     this.WebSocketImpl = WebSocketImpl;
@@ -31,9 +36,13 @@ export class RpcClient extends EventTarget {
     if (this.socket?.readyState === this.WebSocketImpl.OPEN) return Promise.resolve(this);
     if (this.connectPromise) return this.connectPromise;
     this.closed = false;
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
     this.dispatchStatus('checking');
     this.connectPromise = new Promise((resolve, reject) => {
-      const socket = new this.WebSocketImpl(this.url, this.protocols);
+      const socket = this.relay
+        ? new RelaySocket({ ...this.relay, path: this.path, WebSocketImpl: this.WebSocketImpl })
+        : new this.WebSocketImpl(this.url, this.protocols);
       this.socket = socket;
       let opened = false;
       const cleanupInitial = () => {
@@ -55,7 +64,8 @@ export class RpcClient extends EventTarget {
         }
         opened = true;
         cleanupInitial();
-        this.reconnectAttempt = 0;
+        if (this.relay) this.stableTimer = setTimeout(() => { if (this.socket === socket) this.reconnectAttempt = 0; }, 30_000);
+        else this.reconnectAttempt = 0;
         this.dispatchStatus('online');
         this.dispatchEvent(new CustomEvent('open'));
         resolve(this);
@@ -84,10 +94,11 @@ export class RpcClient extends EventTarget {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`RPC request timed out after ${timeoutMs}ms: ${method}`));
+        reject(new Error(`RPC request timed out after ${timeoutMs}ms: ${method}${this.relay ? '; request outcome is unknown. Do not resend without checking remote state.' : ''}`));
       }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
-      this.socket.send(JSON.stringify(message));
+      try { this.socket.send(JSON.stringify(message)); }
+      catch (error) { clearTimeout(timer); this.pending.delete(id); reject(error); }
     });
   }
 
@@ -131,16 +142,23 @@ export class RpcClient extends EventTarget {
 
   handleClose(event, source = this.socket) {
     if (this.socket !== source) return;
-    this.rejectPending(new Error('RPC connection closed before the request completed.'));
+    clearTimeout(this.stableTimer);
+    if (this.relay && event.retryable === false) this.closed = true;
+    this.rejectPending(new Error('RPC connection closed before the request completed; request outcome is unknown. Commands are not automatically resent.'));
     this.dispatchStatus('offline', event.reason || `Connection closed (${event.code}).`);
     this.dispatchEvent(new CustomEvent('close', { detail: event }));
     if (!this.closed && this.reconnect) this.scheduleReconnect();
   }
 
   scheduleReconnect() {
-    clearTimeout(this.reconnectTimer);
-    const delay = Math.min(1_000 * (2 ** this.reconnectAttempt++), 15_000);
-    this.reconnectTimer = setTimeout(() => this.connect().catch(() => this.scheduleReconnect()), delay);
+    if (this.closed || this.reconnectTimer) return;
+    const delay = this.relay
+      ? Math.min(1_000 * (2 ** Math.min(this.reconnectAttempt++, 5)), 30_000) * (0.75 + Math.random() * 0.25)
+      : Math.min(1_000 * (2 ** this.reconnectAttempt++), 15_000);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (!this.closed) this.connect().catch(() => this.scheduleReconnect());
+    }, delay);
   }
 
   dispatchStatus(status, error = null) {
@@ -157,7 +175,9 @@ export class RpcClient extends EventTarget {
 
   close() {
     this.closed = true;
+    clearTimeout(this.stableTimer);
     clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
     this.rejectPending(new Error('RPC client was closed.'));
     this.socket?.close(1000, 'Client closed');
     this.socket = null;

@@ -32,6 +32,7 @@ class FakeSocket extends EventTarget {
 
   send(value) {
     const request = JSON.parse(value);
+    if (request.method === 'rpc:discover') { queueMicrotask(() => this.message({ jsonrpc: '2.0', id: request.id, result: { versions: { rpc: 1 }, scope: 'conversation', methods: ['conversations:context', 'conversations:messages', 'composer-state:save', 'chat:send'] } })); return; }
     if (request.method !== 'conversations:context') return;
     queueMicrotask(() => this.message({
       jsonrpc: '2.0',
@@ -120,16 +121,16 @@ describe('workspace initial scroll', () => {
     }
   });
 
-  test('opens a thread at the start of its latest user message', async () => {
-    const originalRect = HTMLElement.prototype.getBoundingClientRect;
+  test('opens at the bottom and offers a floating return button after scrolling away', async () => {
+    const originalScrollHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight');
+    const originalClientHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
     const originalScrollTo = HTMLElement.prototype.scrollTo;
-    HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
-      if (this.classList?.contains('conversation-scroll')) return { top: 100, bottom: 700, left: 0, right: 900, width: 900, height: 600 };
-      const tops = { 'user-1': 180, 'assistant-1': 260, 'user-2': 460, 'assistant-2': 540 };
-      const top = tops[this.dataset?.messageId] ?? 0;
-      return { top, bottom: top + 60, left: 0, right: 600, width: 600, height: 60 };
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get() { return this.classList?.contains('conversation-scroll') ? 1200 : 0; } });
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get() { return this.classList?.contains('conversation-scroll') ? 600 : 0; } });
+    HTMLElement.prototype.scrollTo = function scrollTo({ top }) {
+      this.scrollTop = top;
+      this.dispatchEvent(new window.Event('scroll'));
     };
-    HTMLElement.prototype.scrollTo = function scrollTo({ top }) { this.scrollTop = top; };
 
     try {
       root = document.createElement('div');
@@ -149,11 +150,75 @@ describe('workspace initial scroll', () => {
 
       const area = root.querySelector('.conversation-scroll');
       expect(root.querySelectorAll('.message.user')).toHaveLength(2);
-      expect(area.scrollTop).toBe(360);
-      expect(area.style.getPropertyValue('--initial-scroll-clearance')).toBe('360px');
+      expect(area.scrollTop).toBe(600);
+
+      act(() => {
+        area.scrollTop = 300;
+        area.dispatchEvent(new window.Event('scroll', { bubbles: true }));
+      });
+      const returnButton = root.querySelector('[aria-label="Scroll to latest message"]');
+      expect(returnButton).not.toBeNull();
+
+      act(() => returnButton.click());
+      expect(area.scrollTop).toBe(600);
+      expect(root.querySelector('[aria-label="Scroll to latest message"]')).toBeNull();
     } finally {
-      HTMLElement.prototype.getBoundingClientRect = originalRect;
+      if (originalScrollHeight) Object.defineProperty(HTMLElement.prototype, 'scrollHeight', originalScrollHeight);
+      else delete HTMLElement.prototype.scrollHeight;
+      if (originalClientHeight) Object.defineProperty(HTMLElement.prototype, 'clientHeight', originalClientHeight);
+      else delete HTMLElement.prototype.clientHeight;
       HTMLElement.prototype.scrollTo = originalScrollTo;
+    }
+  });
+
+  test('minimizes the mobile Composer on scroll and expands it on tap', async () => {
+    const originalMatchMedia = window.matchMedia;
+    window.matchMedia = () => ({ matches: true, addEventListener() {}, removeEventListener() {} });
+
+    try {
+      root = document.createElement('div');
+      document.body.append(root);
+      act(() => render(h(WorkspacePage, {
+        connection: { id: 'connection-1', label: 'Test Avi', serverUrl: 'http://localhost:18991', apiKey: 'synthetic' },
+        globalClient: { request: () => Promise.resolve() },
+        discovery: { appVersion: 'test', apiVersion: 1, versions: { core: 2, mcp: { latest: 1 } } },
+        models: [{ id: 'model:one', name: 'Model One', reasoning: [] }],
+        conversations: [{ id: 'thread-1', title: 'Scroll test', model: 'model:one', projectPath: 'C:\\Code\\avi' }],
+        folders: [],
+        onRefresh() {},
+        onExit() {},
+      }), root));
+
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 30)));
+      const area = root.querySelector('.conversation-scroll');
+      expect(root.querySelector('.composer-wrap').classList.contains('is-compact')).toBeFalse();
+
+      act(() => {
+        area.dispatchEvent(new window.WheelEvent('wheel', { deltaY: 40, bubbles: true }));
+        area.scrollTop = 40;
+        area.dispatchEvent(new window.Event('scroll', { bubbles: true }));
+      });
+      expect(root.querySelector('.composer-wrap').classList.contains('is-compact')).toBeTrue();
+
+      act(() => root.querySelector('[aria-label="Expand message composer"]').click());
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+      expect(root.querySelector('.composer-wrap').classList.contains('is-compact')).toBeFalse();
+      expect(document.activeElement).toBe(root.querySelector('textarea'));
+
+      act(() => {
+        area.scrollTop = 20;
+        area.dispatchEvent(new window.Event('scroll', { bubbles: true }));
+      });
+      expect(root.querySelector('.composer-wrap').classList.contains('is-compact')).toBeFalse();
+
+      act(() => {
+        area.dispatchEvent(new window.Event('touchmove', { bubbles: true }));
+        area.scrollTop = 10;
+        area.dispatchEvent(new window.Event('scroll', { bubbles: true }));
+      });
+      expect(root.querySelector('.composer-wrap').classList.contains('is-compact')).toBeTrue();
+    } finally {
+      window.matchMedia = originalMatchMedia;
     }
   });
 });

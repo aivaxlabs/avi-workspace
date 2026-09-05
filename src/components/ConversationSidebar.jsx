@@ -9,7 +9,7 @@ import {
   filterSidebarConversations,
   normalizeSidebarSnapshot,
 } from '../lib/sidebar-state.js';
-import { SidebarBotDialog, SidebarSearchDialog, SidebarTagsDialog } from './SidebarDialogs.jsx';
+import { SidebarBotDialog, SidebarPromptDialog, SidebarSearchDialog, SidebarTagsDialog } from './SidebarDialogs.jsx';
 
 const STATUS_ICONS = Object.freeze({
   approval: 'ri-shield-keyhole-line',
@@ -29,7 +29,7 @@ const SNOOZE_PRESETS = Object.freeze([
   { label: 'Snooze until restart', options: { untilRestart: true } },
 ]);
 
-const FOLDER_COLORS = Object.freeze(['#8aa7ff', '#66c58a', '#e0aa61', '#ee7d7d', '#c58ae0', '#5fc8c0', '#e0d361', '#8a8f99']);
+const FOLDER_COLORS = Object.freeze(['#e5484d', '#f76b15', '#e3b341', '#46a758', '#12a594', '#3e9df0', '#3e63dd', '#8e4ec6', '#d6409f', '#8b8d98']);
 
 function snoozeRemainingText(snooze) {
   if (!snooze?.active) return null;
@@ -97,6 +97,7 @@ function ThreadRow({ item, selected, status, folderLabel, folderTitle, tagDots, 
 export function ConversationSidebar({
   collapsed, connection, conversations = [], folders = [], models = [], bots, tags,
   sidebarStatus, schedulerSnooze, selectedId,
+  connections = [], onSwitchConnection, switchingConnectionId, connectionStatus,
   onClose, onCollapse, onCreate, onExit, onSelect,
   onRename, onSearch, onArchive, onDelete, onFork, onSetConversationTags,
   onSaveTags, onSaveFolderColor,
@@ -111,7 +112,19 @@ export function ConversationSidebar({
   const [searchOpen, setSearchOpen] = useState(false);
   const [tagsDialogOpen, setTagsDialogOpen] = useState(false);
   const [botDialog, setBotDialog] = useState(null);
+  const [pendingAction, setPendingAction] = useState(null);
+  const [pendingBusy, setPendingBusy] = useState(false);
+  const [pendingError, setPendingError] = useState('');
+  const [feedback, setFeedback] = useState(null);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [tagsBusy, setTagsBusy] = useState(false);
+  const [tagsError, setTagsError] = useState('');
+  const [botBusy, setBotBusy] = useState(false);
+  const [botError, setBotError] = useState('');
   const popoverRef = useRef(null);
+  const feedbackTimer = useRef(null);
+
+  useEffect(() => () => clearTimeout(feedbackTimer.current), []);
 
   useEffect(() => {
     if (!menu) return undefined;
@@ -145,16 +158,35 @@ export function ConversationSidebar({
       if (!popoverRef.current?.contains(event.target) && !anchor.contains(event.target)) setMenu(null);
     };
     const handleKeyDown = (event) => {
-      if (event.key !== 'Escape') return;
-      setMenu(null);
-      anchor.focus();
+      if (event.key === 'Escape') {
+        setMenu(null);
+        anchor.focus();
+        return;
+      }
+      const popover = popoverRef.current;
+      if (!popover || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+      const items = [...popover.querySelectorAll('[role^="menuitem"]:not([disabled])')];
+      if (!items.length) return;
+      event.preventDefault();
+      const index = items.indexOf(document.activeElement);
+      let next;
+      if (event.key === 'Home') next = 0;
+      else if (event.key === 'End') next = items.length - 1;
+      else if (event.key === 'ArrowDown') next = index < 0 ? 0 : (index + 1) % items.length;
+      else next = index < 0 ? items.length - 1 : (index - 1 + items.length) % items.length;
+      items[next]?.focus();
     };
+    const handleFocusOut = (event) => {
+      if (!popoverRef.current?.contains(event.relatedTarget)) setMenu(null);
+    };
+    popoverRef.current?.addEventListener('focusout', handleFocusOut);
     document.addEventListener('pointerdown', dismiss);
     document.addEventListener('keydown', handleKeyDown);
     window.addEventListener('resize', scheduleReposition);
     window.addEventListener('scroll', scheduleReposition, true);
     return () => {
       cancelAnimationFrame(frame);
+      popoverRef.current?.removeEventListener('focusout', handleFocusOut);
       document.removeEventListener('pointerdown', dismiss);
       document.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('resize', scheduleReposition);
@@ -183,29 +215,105 @@ export function ConversationSidebar({
     });
   }
 
+  function showFeedback(text, kind = 'success') {
+    clearTimeout(feedbackTimer.current);
+    setFeedback({ kind, text });
+    feedbackTimer.current = setTimeout(() => setFeedback(null), 3200);
+  }
+
+  async function runMenuAction(run) {
+    if (actionBusy) return;
+    setActionBusy(true);
+    try {
+      await run();
+    } catch (error) {
+      showFeedback(error?.message ?? 'The action failed.', 'error');
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
   function toggleConversationTag(item, tagId) {
     if (!onSetConversationTags) return;
     const current = item.tags ?? [];
     const next = current.includes(tagId) ? current.filter((id) => id !== tagId) : [...current, tagId];
-    onSetConversationTags(item, next);
+    runMenuAction(() => onSetConversationTags(item, next));
   }
 
-  function renameItem(item) {
-    const title = window.prompt('Rename conversation', item.title);
-    if (!title?.trim() || title.trim() === item.title) return;
-    onRename?.(item, title.trim());
+  async function copyItemId(item) {
+    try {
+      if (!globalThis.navigator?.clipboard?.writeText) throw new Error('Clipboard is unavailable in this browser.');
+      await globalThis.navigator.clipboard.writeText(item.id);
+      showFeedback('Thread ID copied to the clipboard.');
+    } catch (error) {
+      showFeedback(error?.message ?? 'Could not copy the thread ID.', 'error');
+    }
   }
 
-  function deleteItem(item) {
-    if (window.confirm(`Delete chat "${item.title || 'New chat'}"? This cannot be undone.`)) onDelete?.(item);
+  function pendingDialogProps(action) {
+    if (action.kind === 'rename') return { title: 'Rename conversation', inputLabel: 'Conversation name', initialValue: action.item.title ?? '', placeholder: 'Conversation name', confirmLabel: 'Rename' };
+    if (action.kind === 'delete-chat') return { title: 'Delete chat', description: `Delete chat "${action.item.title || 'New chat'}"? This cannot be undone.`, confirmLabel: 'Delete chat', danger: true };
+    return { title: 'Delete bot', description: `Delete bot "${action.item.name}"? This cannot be undone.`, confirmLabel: 'Delete bot', danger: true };
   }
 
-  function deleteBot(bot) {
-    if (window.confirm(`Delete bot "${bot.name}"? This cannot be undone.`)) onDeleteBot?.(bot);
+  async function confirmPendingAction(value) {
+    if (!pendingAction || pendingBusy) return;
+    const { kind, item } = pendingAction;
+    setPendingBusy(true);
+    setPendingError('');
+    try {
+      if (kind === 'rename') {
+        await onRename?.(item, value);
+        showFeedback('Conversation renamed.');
+      } else if (kind === 'delete-chat') {
+        await onDelete?.(item);
+        showFeedback('Chat deleted.');
+      } else {
+        await onDeleteBot?.(item);
+        showFeedback('Bot deleted.');
+      }
+      setPendingAction(null);
+    } catch (error) {
+      setPendingError(error?.message ?? 'The action failed.');
+    } finally {
+      setPendingBusy(false);
+    }
   }
 
-  function copyItemId(item) {
-    globalThis.navigator?.clipboard?.writeText(item.id)?.catch?.(() => {});
+  function closePendingAction() {
+    if (pendingBusy) return;
+    setPendingAction(null);
+    setPendingError('');
+  }
+
+  async function saveTags(nextTags) {
+    setTagsBusy(true);
+    setTagsError('');
+    try {
+      await onSaveTags?.(nextTags);
+      setTagsDialogOpen(false);
+      showFeedback('Tags saved.');
+    } catch (error) {
+      setTagsError(error?.message ?? 'Could not save the tags.');
+    } finally {
+      setTagsBusy(false);
+    }
+  }
+
+  async function saveBot(changes) {
+    if (!botDialog) return;
+    const editing = Boolean(botDialog.bot);
+    setBotBusy(true);
+    setBotError('');
+    try {
+      await (editing ? onUpdateBot?.(botDialog.bot, changes) : onCreateBot?.(changes));
+      setBotDialog(null);
+      showFeedback(editing ? 'Bot saved.' : 'Bot created.');
+    } catch (error) {
+      setBotError(error?.message ?? 'Could not save the bot.');
+    } finally {
+      setBotBusy(false);
+    }
   }
 
   function toggleExpanded(key) {
@@ -248,10 +356,8 @@ export function ConversationSidebar({
     const visibleItems = expanded ? items : items.slice(0, FOLDER_GROUP_LIMIT);
     return (
       <section class={`task-group ${spin ? 'working-group' : 'review-group'}`} key={key}>
-        <div class="task-group-label">
-          <i class={spin ? 'ri-loader-4-line spinning' : 'ri-check-double-line'} aria-hidden="true" />
-          <span>{title}</span>
-          <b>{items.length}</b>
+        <div class="sidebar-section-header">
+          <strong><span>{title}</span><small>{items.length}</small></strong>
         </div>
         <ul class="thread-list compact">
           {visibleItems.map((item) => {
@@ -278,7 +384,7 @@ export function ConversationSidebar({
     menuContent = (
       <>
         <strong>Choose working folder</strong>
-        {navigation.choices.map((folder) => <button key={folder.key} type="button" role="menuitem" onClick={() => { setMenu(null); onCreate(folder); onClose?.(); }}><i class={folder.isHome ? 'ri-home-4-line' : 'ri-folder-line'} /><span><b>{folder.label}</b><small>{folder.displayPath}</small></span></button>)}
+        {navigation.choices.map((folder) => <button key={folder.key} type="button" role="menuitem" onClick={() => { setMenu(null); if (onCreate) { onCreate(folder); onClose?.(); } }}><i class={folder.isHome ? 'ri-home-4-line' : 'ri-folder-line'} /><span><b>{folder.label}</b><small>{folder.displayPath}</small></span></button>)}
       </>
     );
   } else if (menu?.kind === 'snooze') {
@@ -286,12 +392,12 @@ export function ConversationSidebar({
     menuContent = (
       <>
         {SNOOZE_PRESETS.map((preset) => (
-          <MenuItem key={preset.label} icon="ri-time-line" onClick={() => { setMenu(null); onSnoozeBots(preset.options); }}>{preset.label}</MenuItem>
+          <MenuItem key={preset.label} icon="ri-time-line" onClick={() => { setMenu(null); runMenuAction(() => onSnoozeBots(preset.options)); }}>{preset.label}</MenuItem>
         ))}
         {schedulerSnooze?.active && snoozeRemaining && (
           <>
             <MenuDivider />
-            <MenuItem icon="ri-close-circle-line" onClick={() => { setMenu(null); onSnoozeBots({ reset: true }); }}>Reset ({snoozeRemaining})</MenuItem>
+            <MenuItem icon="ri-close-circle-line" onClick={() => { setMenu(null); runMenuAction(() => onSnoozeBots({ reset: true })); }}>Reset ({snoozeRemaining})</MenuItem>
           </>
         )}
       </>
@@ -302,18 +408,18 @@ export function ConversationSidebar({
     menuContent = (
       <>
         {onUpdateBot && <MenuItem icon="ri-pencil-line" onClick={() => { setMenu(null); setBotDialog({ bot }); }}>Edit...</MenuItem>}
-        {onActivateBot && <MenuItem icon="ri-play-circle-line" disabled={bot.enabled === false} onClick={() => { setMenu(null); onActivateBot(bot); }}>Activate now</MenuItem>}
+        {onActivateBot && <MenuItem icon="ri-play-circle-line" disabled={bot.enabled === false} onClick={() => { setMenu(null); runMenuAction(() => onActivateBot(bot)); }}>Activate now</MenuItem>}
         {onSnoozeBot && (
           <>
-            <MenuItem icon="ri-time-line" onClick={() => { setMenu(null); onSnoozeBot(bot, { durationMinutes: 60 }); }}>Snooze for 1h</MenuItem>
-            <MenuItem icon="ri-time-line" onClick={() => { setMenu(null); onSnoozeBot(bot, { durationMinutes: 1440 }); }}>Snooze for 24h</MenuItem>
-            {bot.snooze?.active && <MenuItem icon="ri-close-circle-line" onClick={() => { setMenu(null); onSnoozeBot(bot, { reset: true }); }}>Reset snooze</MenuItem>}
+            <MenuItem icon="ri-time-line" onClick={() => { setMenu(null); runMenuAction(() => onSnoozeBot(bot, { durationMinutes: 60 })); }}>Snooze for 1h</MenuItem>
+            <MenuItem icon="ri-time-line" onClick={() => { setMenu(null); runMenuAction(() => onSnoozeBot(bot, { durationMinutes: 1440 })); }}>Snooze for 24h</MenuItem>
+            {bot.snooze?.active && <MenuItem icon="ri-close-circle-line" onClick={() => { setMenu(null); runMenuAction(() => onSnoozeBot(bot, { reset: true })); }}>Reset snooze</MenuItem>}
           </>
         )}
         {onDeleteBot && (
           <>
             <MenuDivider />
-            <MenuItem icon="ri-delete-bin-line" danger onClick={() => { setMenu(null); deleteBot(bot); }}>Delete bot</MenuItem>
+            <MenuItem icon="ri-delete-bin-line" danger onClick={() => { setMenu(null); setPendingAction({ kind: 'delete-bot', item: bot }); }}>Delete bot</MenuItem>
           </>
         )}
       </>
@@ -347,8 +453,8 @@ export function ConversationSidebar({
     menuLabel = `Actions for ${item.title || 'New chat'}`;
     menuContent = (
       <>
-        {onRename && <MenuItem icon="ri-pencil-line" onClick={() => { setMenu(null); renameItem(item); }}>Rename</MenuItem>}
-        {onFork && <MenuItem icon="ri-git-branch-line" onClick={() => { setMenu(null); onFork(item); }}>Fork chat</MenuItem>}
+        {onRename && <MenuItem icon="ri-pencil-line" onClick={() => { setMenu(null); setPendingAction({ kind: 'rename', item }); }}>Rename</MenuItem>}
+        {onFork && <MenuItem icon="ri-git-branch-line" onClick={() => { setMenu(null); runMenuAction(() => onFork(item)); }}>Fork chat</MenuItem>}
         <MenuItem icon="ri-hashtag" onClick={() => { setMenu(null); copyItemId(item); }}>Copy thread ID</MenuItem>
         <MenuDivider />
         {onSetConversationTags && (tagFilters.length > 0
@@ -358,8 +464,8 @@ export function ConversationSidebar({
           : <div class="menu-empty">No tags yet</div>)}
         {onSaveTags && <MenuItem icon="ri-settings-3-line" onClick={() => { setMenu(null); setTagsDialogOpen(true); }}>Manage tags...</MenuItem>}
         {(onArchive || onDelete) && <MenuDivider />}
-        {onArchive && <MenuItem icon="ri-archive-line" onClick={() => { setMenu(null); onArchive(item); }}>Archive chat</MenuItem>}
-        {onDelete && <MenuItem icon="ri-delete-bin-line" danger onClick={() => { setMenu(null); deleteItem(item); }}>Delete chat</MenuItem>}
+        {onArchive && <MenuItem icon="ri-archive-line" onClick={() => { setMenu(null); runMenuAction(() => onArchive(item)); }}>Archive chat</MenuItem>}
+        {onDelete && <MenuItem icon="ri-delete-bin-line" danger onClick={() => { setMenu(null); setPendingAction({ kind: 'delete-chat', item }); }}>Delete chat</MenuItem>}
       </>
     );
   } else if (menu?.kind === 'color') {
@@ -378,11 +484,11 @@ export function ConversationSidebar({
               aria-label={`Set folder color ${color}`}
               class={`color-swatch${group.color === color ? ' active' : ''}`}
               style={{ background: color }}
-              onClick={() => { setMenu(null); onSaveFolderColor(group, color); }}
+              onClick={() => { setMenu(null); runMenuAction(() => onSaveFolderColor(group, color)); }}
             />
           ))}
         </div>
-        <MenuItem icon="ri-close-circle-line" onClick={() => { setMenu(null); onSaveFolderColor(group, null); }}>No color</MenuItem>
+        <MenuItem icon="ri-close-circle-line" onClick={() => { setMenu(null); runMenuAction(() => onSaveFolderColor(group, null)); }}>No color</MenuItem>
       </>
     );
   }
@@ -390,19 +496,26 @@ export function ConversationSidebar({
   return (
     <aside class="sidebar">
       <header>
-        <span class="avi-mark">A</span>
+        <span class="avi-mark"><img src="avi.png" alt="" width="22" height="22" />AVI</span>
         <button aria-label={onClose ? 'Close navigation' : collapsed ? 'Expand sidebar' : 'Collapse sidebar'} onClick={onClose ?? onCollapse}><i class={onClose ? 'ri-close-line' : collapsed ? 'ri-layout-left-line' : 'ri-side-bar-line'} /></button>
       </header>
       <nav>
+        {!collapsed && <div class="instance-bar">
+          {onSwitchConnection && connections.length > 0 ? <select aria-label="Active Avi instance" value={connection.id} disabled={Boolean(switchingConnectionId)} onChange={(event) => {
+            const next = connections.find((item) => item.id === event.currentTarget.value);
+            if (next) onSwitchConnection(next);
+          }}>{connections.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select> : <span class="instance-name">{connection.label}</span>}
+          <span class={`instance-status ${connectionStatus?.status ?? 'online'}`} role="status">{switchingConnectionId ? 'Switching instance...' : connectionStatus?.status ?? 'online'}</span>
+        </div>}
         <div class="new-chat-control">
-          <button type="button" class="nav-action" aria-label="New chat" aria-haspopup="menu" aria-expanded={menu?.kind === 'picker'} onClick={(event) => toggleMenu('picker', null, event.currentTarget)}><i class="ri-add-line" /><span>New chat</span><i class="ri-arrow-down-s-line nav-action-chevron" /></button>
+          <button type="button" class="nav-action" aria-label="New chat" aria-haspopup="menu" aria-expanded={menu?.kind === 'picker'} disabled={!onCreate} title={onCreate ? undefined : 'This Avi instance does not allow creating new chats.'} onClick={(event) => toggleMenu('picker', null, event.currentTarget)}><i class="ri-add-line" /><span>New chat</span><i class="ri-arrow-down-s-line nav-action-chevron" /></button>
         </div>
         {onSearch && <button type="button" class="nav-action ghost search-action" aria-label="Search chats" onClick={() => setSearchOpen(true)}><i class="ri-search-line" /><span>Search chats</span></button>}
 
         {Array.isArray(bots) && (
           <div class="nav-section bots-section">
-            <div class="nav-section-label-row">
-              <strong><i class="ri-robot-2-line" aria-hidden="true" /><span>Bots</span><small>{botsWithStatus.length}</small></strong>
+            <div class="sidebar-section-header">
+              <strong><span>Bots</span><small>{botsWithStatus.length}</small></strong>
               <span class="section-actions">
                 {onSnoozeBots && (
                   <button
@@ -431,6 +544,8 @@ export function ConversationSidebar({
                         type="button"
                         class="bot-open"
                         aria-label={`${bot.name} — ${bot.status.label}`}
+                        disabled={!bot.conversationId}
+                        title={bot.conversationId ? undefined : 'This bot has no conversation yet'}
                         onClick={() => { if (bot.conversationId) { onSelect(bot.conversationId); onClose?.(); } }}
                       >
                         <i class={`bot-status-dot ${bot.status.state}`} title={bot.status.label} aria-label={bot.status.label} />
@@ -449,7 +564,7 @@ export function ConversationSidebar({
         )}
 
         <div class="nav-section folder-conversations">
-          <div class="nav-section-label-row">
+          <div class="sidebar-section-header">
             <strong><span>Conversations</span><small>{visibleConversations.length}</small></strong>
             {(Array.isArray(tags) || onSaveTags) && (
               <button
@@ -465,7 +580,7 @@ export function ConversationSidebar({
           </div>
           {hasTaskGroups && taskGroupSection('Working', 'task:working', taskGroups.working, true)}
           {taskGroups.review.length > 0 && taskGroupSection('Review', 'task:review', taskGroups.review, false)}
-          {hasTaskGroups && <div class="folders-label">Folders</div>}
+          {hasTaskGroups && <div class="sidebar-section-header folders-header"><strong><span>Folders</span></strong></div>}
           {navigation.groups.length ? navigation.groups.map((group) => {
             const open = openGroups[group.key] !== false;
             const expanded = Boolean(expandedGroups[group.key]);
@@ -485,7 +600,7 @@ export function ConversationSidebar({
                       onClick={(event) => toggleMenu('color', group.key, event.currentTarget, group)}
                     ><i class="ri-palette-line" />{group.color && <span class="tag-dot" style={{ background: group.color }} />}</button>
                   )}
-                  <button type="button" class="folder-new-chat" aria-label={`New chat with ${group.label}`} title={`New chat with ${group.label}`} onClick={() => { onCreate(group); onClose?.(); }}><i class="ri-add-line" /></button>
+                  <button type="button" class="folder-new-chat" aria-label={`New chat with ${group.label}`} title={onCreate ? `New chat with ${group.label}` : 'This Avi instance does not allow creating new chats.'} disabled={!onCreate} onClick={() => { if (onCreate) { onCreate(group); onClose?.(); } }}><i class="ri-add-line" /></button>
                 </header>
                 {open && (
                   <>
@@ -503,7 +618,17 @@ export function ConversationSidebar({
           }) : !hasTaskGroups ? <p class="sidebar-empty">No conversations yet.</p> : null}
         </div>
       </nav>
-      <footer><button aria-label={`Disconnect ${connection.label}`} onClick={onExit}><i class="ri-links-line" /><span>{connection.label}</span></button></footer>
+      {feedback && <p class={`sidebar-feedback ${feedback.kind === 'error' ? 'is-error' : 'is-success'}`} role="status">{feedback.text}</p>}
+      {pendingAction && (
+        <SidebarPromptDialog
+          {...pendingDialogProps(pendingAction)}
+          busy={pendingBusy}
+          error={pendingError}
+          onConfirm={confirmPendingAction}
+          onClose={closePendingAction}
+        />
+      )}
+      <footer><button aria-label={`Disconnect ${connection.label}`} onClick={onExit}><i class="ri-links-line" /><span>Connections</span></button></footer>
       {menu && createPortal(
         <div
           ref={popoverRef}
@@ -524,8 +649,10 @@ export function ConversationSidebar({
       {tagsDialogOpen && onSaveTags && (
         <SidebarTagsDialog
           tags={tags ?? []}
-          onClose={() => setTagsDialogOpen(false)}
-          onSave={(nextTags) => { onSaveTags(nextTags); setTagsDialogOpen(false); }}
+          busy={tagsBusy}
+          error={tagsError}
+          onClose={() => { if (!tagsBusy) setTagsDialogOpen(false); }}
+          onSave={saveTags}
         />
       )}
       {botDialog && (botDialog.bot ? onUpdateBot : onCreateBot) && (
@@ -533,12 +660,10 @@ export function ConversationSidebar({
           bot={botDialog.bot}
           models={models}
           folders={folders}
-          onClose={() => setBotDialog(null)}
-          onSubmit={(changes) => {
-            if (botDialog.bot) onUpdateBot(botDialog.bot, changes);
-            else onCreateBot(changes);
-            setBotDialog(null);
-          }}
+          busy={botBusy}
+          error={botError}
+          onClose={() => { if (!botBusy) setBotDialog(null); }}
+          onSubmit={saveBot}
         />
       )}
     </aside>

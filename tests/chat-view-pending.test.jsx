@@ -33,6 +33,7 @@ class FakeSocket extends EventTarget {
 
   send(value) {
     const request = JSON.parse(value);
+    if (request.method === 'rpc:discover') { queueMicrotask(() => this.message({ jsonrpc: '2.0', id: request.id, result: { versions: { rpc: 1 }, scope: 'conversation', methods: ['conversations:context', 'composer-state:save', 'chat:send'] } })); return; }
     if (request.method !== 'conversations:context') return;
     queueMicrotask(() => this.message({
       jsonrpc: '2.0',

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { normalizeSearchResults } from '../lib/sidebar-state.js';
+import { useModalFocus } from '../lib/use-modal-focus.js';
 
-const TAG_COLORS = Object.freeze(['#8aa7ff', '#66c58a', '#e0aa61', '#ee7d7d', '#c58ae0', '#5fc8c0', '#e0d361', '#8a8f99']);
+const TAG_COLORS = Object.freeze(['#e5484d', '#f76b15', '#e3b341', '#46a758', '#12a594', '#3e9df0', '#3e63dd', '#8e4ec6', '#d6409f', '#8b8d98']);
 
 function formatAge(timestamp) {
   const time = Date.parse(timestamp ?? '');
@@ -16,25 +17,13 @@ function formatAge(timestamp) {
   return new Date(time).toLocaleDateString();
 }
 
-function useDialogDismiss(onClose) {
-  const firstFieldRef = useRef(null);
-  useEffect(() => {
-    firstFieldRef.current?.focus();
-    const onKey = (event) => {
-      if (event.key !== 'Escape') return;
-      event.stopPropagation();
-      onClose();
-    };
-    document.addEventListener('keydown', onKey, true);
-    return () => document.removeEventListener('keydown', onKey, true);
-  }, []);
-  return firstFieldRef;
-}
-
-function DialogShell({ title, search = false, onClose, onKeyDown, children }) {
+function DialogShell({ title, search = false, onClose, onKeyDown, initialFocusRef, children }) {
+  const dialogRef = useRef(null);
+  useModalFocus({ containerRef: dialogRef, onClose, initialFocusRef });
   return (
     <div class="sidebar-dialog-backdrop" onMouseDown={onClose}>
       <section
+        ref={dialogRef}
         class={`sidebar-dialog${search ? ' search-dialog' : ' manage-dialog'}`}
         role="dialog"
         aria-modal="true"
@@ -60,37 +49,43 @@ export function SidebarSearchDialog({ onSearch, onSelect, onClose }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
+  const [error, setError] = useState('');
   const [selected, setSelected] = useState(0);
   const resultsRef = useRef(null);
+  const inputRef = useRef(null);
   const tokenRef = useRef(0);
-  const inputRef = useDialogDismiss(onClose);
+
+  function searchNow() {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setResults([]);
+      setSearching(false);
+      setError('');
+      return;
+    }
+    const token = ++tokenRef.current;
+    setSearching(true);
+    setError('');
+    Promise.resolve(onSearch(trimmed)).then((found) => {
+      if (token !== tokenRef.current) return;
+      setResults(normalizeSearchResults(found));
+      setSelected(0);
+    }).catch((value) => {
+      if (token !== tokenRef.current) return;
+      setResults([]);
+      setSelected(0);
+      setError(value instanceof Error ? value.message : String(value));
+    }).finally(() => {
+      if (token === tokenRef.current) setSearching(false);
+    });
+  }
 
   useEffect(() => {
-    const token = ++tokenRef.current;
-    const handle = setTimeout(async () => {
-      const trimmed = query.trim();
-      if (!trimmed) {
-        setResults([]);
-        setSearching(false);
-        return;
-      }
-      setSearching(true);
-      try {
-        const next = normalizeSearchResults(await onSearch(trimmed));
-        if (token === tokenRef.current) {
-          setResults(next);
-          setSelected(0);
-        }
-      } catch {
-        if (token === tokenRef.current) {
-          setResults([]);
-          setSelected(0);
-        }
-      } finally {
-        if (token === tokenRef.current) setSearching(false);
-      }
-    }, 200);
-    return () => clearTimeout(handle);
+    const handle = setTimeout(searchNow, 200);
+    return () => {
+      clearTimeout(handle);
+      tokenRef.current += 1;
+    };
   }, [query]);
 
   useEffect(() => {
@@ -104,6 +99,10 @@ export function SidebarSearchDialog({ onSearch, onSelect, onClose }) {
   }
 
   function onKeyDown(event) {
+    const target = event.target;
+    const fromInput = target === inputRef.current;
+    const fromResult = Boolean(target?.closest?.('[role="option"]'));
+    if (!fromInput && !fromResult) return;
     if (event.key === 'ArrowDown' && results.length) {
       event.preventDefault();
       setSelected((current) => (current + 1) % results.length);
@@ -117,7 +116,7 @@ export function SidebarSearchDialog({ onSearch, onSelect, onClose }) {
   }
 
   return (
-    <DialogShell title="Search chats" search onClose={onClose} onKeyDown={onKeyDown}>
+    <DialogShell title="Search chats" search onClose={onClose} onKeyDown={onKeyDown} initialFocusRef={inputRef}>
       <label class="dialog-search">
         <i class="ri-search-line" aria-hidden="true" />
         <input
@@ -132,7 +131,13 @@ export function SidebarSearchDialog({ onSearch, onSelect, onClose }) {
         />
         {searching ? <i class="ri-loader-4-line spinning" role="status" aria-label="Searching" /> : <kbd>Esc</kbd>}
       </label>
-      {query.trim() && (
+      {query.trim() && (error && !searching ? (
+        <div class="search-error" role="alert">
+          <i class="ri-error-warning-line" aria-hidden="true" />
+          <span>Could not search: {error}</span>
+          <button type="button" class="dialog-secondary" onClick={searchNow}>Retry</button>
+        </div>
+      ) : (
         <div ref={resultsRef} id="sidebar-search-results" class="search-results" role="listbox" aria-label="Chat search results">
           {!searching && results.length > 0 && <div class="search-results-label">Results<span>{results.length}</span></div>}
           {results.map((result, index) => (
@@ -162,14 +167,14 @@ export function SidebarSearchDialog({ onSearch, onSelect, onClose }) {
             <div class="search-empty"><i class="ri-search-line" aria-hidden="true" /><span>No chats found for that query.</span></div>
           )}
         </div>
-      )}
+      ))}
     </DialogShell>
   );
 }
 
-export function SidebarTagsDialog({ tags, onClose, onSave }) {
+export function SidebarTagsDialog({ tags, onClose, onSave, busy = false, error = '' }) {
   const [draft, setDraft] = useState(() => (Array.isArray(tags) ? tags : []).map((tag) => ({ ...tag })));
-  const firstFieldRef = useDialogDismiss(onClose);
+  const firstFieldRef = useRef(null);
 
   function updateTag(id, changes) {
     setDraft((current) => current.map((tag) => (tag.id === id ? { ...tag, ...changes } : tag)));
@@ -183,7 +188,7 @@ export function SidebarTagsDialog({ tags, onClose, onSave }) {
   }
 
   return (
-    <DialogShell title="Manage tags" onClose={onClose}>
+    <DialogShell title="Manage tags" onClose={onClose} initialFocusRef={firstFieldRef}>
       <div class="dialog-body">
         {draft.map((tag, index) => (
           <div class="tag-row" key={tag.id}>
@@ -211,34 +216,35 @@ export function SidebarTagsDialog({ tags, onClose, onSave }) {
           </div>
         ))}
         {!draft.length && <p class="dialog-empty">No tags yet. Create the first one.</p>}
-        <button type="button" class="dialog-secondary" onClick={addTag}><i class="ri-add-line" aria-hidden="true" />New tag</button>
+        <button type="button" class="dialog-secondary" disabled={busy} onClick={addTag}><i class="ri-add-line" aria-hidden="true" />New tag</button>
+        {error && <p class="dialog-error" role="alert">{error}</p>}
       </div>
       <footer>
-        <button type="button" onClick={onClose}>Cancel</button>
-        <button type="button" class="primary" onClick={() => onSave(draft.filter((tag) => tag.name.trim()))}>Save tags</button>
+        <button type="button" disabled={busy} onClick={onClose}>Cancel</button>
+        <button type="button" class="primary" disabled={busy} onClick={() => onSave(draft.filter((tag) => tag.name.trim()))}>Save tags</button>
       </footer>
     </DialogShell>
   );
 }
 
-export function SidebarBotDialog({ bot = null, models = [], folders = [], onClose, onSubmit }) {
+export function SidebarBotDialog({ bot = null, models = [], folders = [], busy = false, error = '', onClose, onSubmit }) {
   const [name, setName] = useState(bot?.name ?? '');
   const [model, setModel] = useState(bot?.model ?? models[0]?.id ?? '');
   const [workingFolder, setWorkingFolder] = useState(bot?.workingFolder ?? '');
   const [enabled, setEnabled] = useState(bot?.enabled ?? true);
-  const firstFieldRef = useDialogDismiss(onClose);
+  const nameInputRef = useRef(null);
 
   function submit(event) {
     event.preventDefault();
-    if (!name.trim()) return;
+    if (busy || !name.trim()) return;
     onSubmit({ name: name.trim(), model, workingFolder: workingFolder || null, enabled });
   }
 
   return (
-    <DialogShell title={bot ? 'Edit bot' : 'Create bot'} onClose={onClose}>
+    <DialogShell title={bot ? 'Edit bot' : 'Create bot'} onClose={onClose} initialFocusRef={nameInputRef}>
       <form class="dialog-body bot-form" onSubmit={submit}>
         <label>Name
-          <input ref={firstFieldRef} type="text" value={name} placeholder="Bot name" onInput={(event) => setName(event.currentTarget.value)} />
+          <input ref={nameInputRef} type="text" value={name} placeholder="Bot name" onInput={(event) => setName(event.currentTarget.value)} />
         </label>
         <label>Model
           <select value={model} onChange={(event) => setModel(event.currentTarget.value)}>
@@ -255,9 +261,55 @@ export function SidebarBotDialog({ bot = null, models = [], folders = [], onClos
           <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.currentTarget.checked)} />
           Enabled
         </label>
+        {error && <p class="dialog-error" role="alert">{error}</p>}
         <footer>
-          <button type="button" onClick={onClose}>Cancel</button>
-          <button type="submit" class="primary" disabled={!name.trim()}>{bot ? 'Save bot' : 'Create bot'}</button>
+          <button type="button" disabled={busy} onClick={onClose}>Cancel</button>
+          <button type="submit" class="primary" disabled={busy || !name.trim()}>{bot ? 'Save bot' : 'Create bot'}</button>
+        </footer>
+      </form>
+    </DialogShell>
+  );
+}
+
+export function SidebarPromptDialog({ title, description, inputLabel, initialValue = '', placeholder, confirmLabel = 'Confirm', danger = false, busy = false, error = '', onConfirm, onClose }) {
+  const [value, setValue] = useState(initialValue);
+  const inputRef = useRef(null);
+  const cancelRef = useRef(null);
+  const submitting = useRef(false);
+  const textAction = Boolean(inputLabel);
+
+  function submit(event) {
+    event.preventDefault();
+    if (busy || submitting.current) return;
+    const trimmed = value.trim();
+    if (textAction && !trimmed) return;
+    if (textAction && trimmed === String(initialValue).trim()) {
+      onClose();
+      return;
+    }
+    submitting.current = true;
+    Promise.resolve(onConfirm(textAction ? trimmed : undefined)).finally(() => { submitting.current = false; });
+  }
+
+  return (
+    <DialogShell title={title} onClose={onClose} initialFocusRef={textAction ? inputRef : cancelRef}>
+      <form class="dialog-body prompt-form" onSubmit={submit}>
+        {description && <p class="prompt-description">{description}</p>}
+        {textAction && (
+          <label>{inputLabel}
+            <input
+              ref={inputRef}
+              type="text"
+              value={value}
+              placeholder={placeholder}
+              onInput={(event) => setValue(event.currentTarget.value)}
+            />
+          </label>
+        )}
+        {error && <p class="dialog-error" role="alert">{error}</p>}
+        <footer>
+          <button type="button" ref={cancelRef} disabled={busy} onClick={onClose}>Cancel</button>
+          <button type="submit" class={`primary${danger ? ' danger' : ''}`} disabled={busy || (textAction && !value.trim())}>{confirmLabel}</button>
         </footer>
       </form>
     </DialogShell>

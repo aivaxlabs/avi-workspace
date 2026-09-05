@@ -4,15 +4,32 @@
 
 ### Added
 
+- Relay sessions authenticate with the AIVAX session alone: the Avi Remote key prompt was removed, device selection connects directly, and the relay control envelope is version 2 with `{ type: 'avi-remote-open', version: 2, path }` carrying no credential; version 1 handshakes are rejected instead of marking the channel ready. The physical `avi-relay-v1` subprotocol and direct API-key connections are unchanged.
+
+- Installable PWA manifest, regular/maskable/Apple icons, device theme colors and safe-area styling. A production-only, build-versioned service worker caches public shell assets for offline launch without persisting RPC data or forcing active sessions to reload.
+
+- Mobile composer queue summary opens a bottom sheet with full message text, per-message action menus, readable reorder/prioritize/remove actions, and in-panel feedback.
+
+- Assistant-message actions to copy the answer Markdown and fork the conversation through that response, with clipboard/error feedback and discovery-gated forking.
+
+- Collapsed sidebar uses a centered icon rail with the expand control, New chat, Search, and Connections; branding and conversation groups stay hidden until expanded.
+
+- Compact single-row conversation header and desktop panel resizing with pointer/keyboard controls and in-memory widths.
+- Conversation-scoped discovery, refreshed on recovery/reconnection, instead of incorrectly gating conversation tools against global methods.
+
+- Desktop Axion-dark branding: design tokens, official Avi icon with AVI wordmark in the sidebar/connections/empty-chat surfaces and favicon, desktop-style composer surface with inverse send button, and the desktop folder/tag color palette.
+
 - Desktop-sidebar parity with Bots management and activation/snooze actions, chat search, tag catalog and filters, global Working/Review groups, agent-created filtering, folder colors, conversation management actions, and remote completion acknowledgement. Each RPC-dependent control is gated by method discovery, and the existing phone drawer exposes the same surfaces.
-- Phone workspace shell with a fixed thread/folder header, hidden sidebar, immersive navigation drawer and fullscreen auxiliary panel, safe-area support, and a compact composer that moves permission selection into the Plus menu.
+- Phone workspace shell with a fixed thread/folder header, hidden sidebar, navigation drawer and modal auxiliary panel, safe-area support, and a compact composer that moves permission selection into the Plus menu.
 - Composer rebuilt around authoritative RPC state: `conversations:context` hydrates per-thread state, while `models:list.messageDeliveryMode` supplies Avi's global Queue/Steer preference. Enter uses the configured mode, Ctrl+Enter uses the opposite, draft autosave includes `workMode` and `ultraMode`, and `chat:send` carries the complete composer controls.
 - Styled composer controls: permission dropdown with labels and descriptions, model/reasoning-effort menu, Plus menu with Plan/Goal/Ultra modes and Side chat (no Electron-only actions), circular send/stop button, and mode chips.
-- Composer strips: edit-diff pill derived from `messages.edits`, task completion and sub-agent/rubber-duck status strips, and queue strips with cancel, steer, and reorder actions; read-only footer with working folder, Git branch, permission lock, and context percentage.
+- Composer strips: edit-diff pill derived from `messages.edits`, task completion and sub-agent/rubber-duck status strips, and queue strips with cancel, steer, and reorder actions; read-only footer with working folder, Git branch and context percentage.
 - Periodic authoritative `conversations:context` projection refresh while a thread is open, keeping run/queue/task/agent counters and context usage live without overlapping recovery or clobbering locally loaded history and the composer snapshot.
 - Initial static Preact Avi workspace with connection-only IndexedDB storage, strict browser WebSocket authentication, global and conversation RPC lifecycles, bounded history, rich chat, interruptions, remote discovery, and responsive auxiliary tooling.
 - Folder-grouped conversation navigation with collapsible sections, bounded Show more controls, per-folder new-chat actions, and an explicit working-folder picker.
 - Cascadium/XCSS design system, local Remix Icons, focused unit tests, and architecture/security documentation.
+- Quick instance switching from the sidebar and the Connections manager: one active instance at a time, with per-instance memory retention of the selected thread and drafts while the page stays open.
+- Draft autosave with visible save status and a retry control after failed saves.
 
 ### Fixed
 
@@ -30,8 +47,10 @@
 - Reconcile recent messages during periodic `conversations:context` refreshes so missed stream updates no longer leave completed tool calls spinning indefinitely, while preserving older history and local composer state.
 - Respect projected tool-call `hasResult` state and load deferred input/output through `conversations:tool-call-details`, with visible loading and error feedback.
 - Render sidebar dropdowns as viewport-clamped global popovers so they are no longer clipped by sidebar scrolling, only one stays open, and outside click or Escape closes them.
+- Move the immersive shell breakpoint from 640px to 860px so tablets get the drawer with named navigation and modal auxiliary panels instead of hidden conversations and bots; the compact composer still switches at 640px.
+- Scroll wide code and tool-output blocks internally so 390px phone viewports no longer overflow the page width (confirmed in isolated visual checks at a 390px viewport).
 - Restore compact sidebar hierarchy by separating section counts and bot states, styling Working/Review headers, unifying row density, and hiding full lists in the 58px intermediate rail.
-- Open each thread with the start of its latest user message aligned to the conversation viewport instead of defaulting to the bottom.
+- Open each thread with the viewport anchored at the bottom on the latest messages, with a scroll-to-latest control when reading older history.
 - Preserve unsaved composer text and controls when the conversation socket reconnects instead of reapplying an older server snapshot for the same thread.
 - Allow same-origin development probes and scope Vite's required inline-style permission to the development server without weakening production CSP.
 - Restore visible keyboard focus in the composer, correct connection CTA and secondary-text contrast, name free-text questions, and announce Attention changes through an accessible status region.

@@ -81,8 +81,13 @@ describe('sidebar Desktop parity', () => {
     expect(root.textContent).toContain('Review');
     expect(root.querySelector('.working-group .thread-open small').textContent).toBe('avi');
     expect(root.querySelector('.working-group .thread-open small').title).toBe('C:\\Code\\avi');
-    expect(root.querySelector('.working-group .task-group-label b').textContent).toBe('1');
-    expect(root.querySelector('.review-group .task-group-label .ri-check-double-line')).toBeTruthy();
+    const sectionHeaders = [...root.querySelectorAll('.sidebar-section-header')];
+    expect(sectionHeaders.map((header) => header.querySelector('span').textContent)).toEqual(['Bots', 'Conversations', 'Working', 'Review', 'Folders']);
+    expect(sectionHeaders.every((header) => !header.querySelector(':scope > strong > i'))).toBeTrue();
+    expect(sectionHeaders.map((header) => header.querySelector('small')?.textContent ?? null)).toEqual(['1', '2', '1', '1', null]);
+    expect(root.querySelector('[aria-label="Snooze bots"]')).not.toBeNull();
+    expect(root.querySelector('[aria-label="New bot"]')).not.toBeNull();
+    expect(root.querySelector('[aria-label="Filter conversations"]')).not.toBeNull();
     expect(root.textContent).not.toContain('Agent thread');
 
     const filterTrigger = root.querySelector('[aria-label="Filter conversations"]');
@@ -106,6 +111,7 @@ describe('sidebar Desktop parity', () => {
     expect(conversationMenu.parentElement).toBe(document.body);
     expect(workingRows.filter((row) => row.querySelector('.thread-menu').getAttribute('aria-expanded') === 'true')).toHaveLength(1);
     act(() => buttonWithText(conversationMenu, 'Fork').click());
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
     expect(calls).toContainEqual(['fork', 'working']);
 
     const botTrigger = root.querySelector('[aria-label="Actions for Release bot"]');

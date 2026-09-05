@@ -1,44 +1,82 @@
 :root {
   color-scheme: dark;
-  --font-ui: "Segoe UI Variable", "Segoe UI", sans-serif;
-  --font-code: "Cascadia Code", "SFMono-Regular", monospace;
-  --font-xl: 18px;
-  --font-lg: 16.8px;
-  --font-md: 16px;
-  --font-sm: 14.4px;
-  --font-xs: 12.96px;
-  --background-primary: #18191b;
-  --background-secondary: #202124;
-  --background-tertiary: #292a2e;
-  --background-elevated: #303136;
-  --text-primary: #ececee;
-  --text-secondary: #a9abb2;
-  --text-muted: #a0a3ab;
-  --border-color: #34363b;
-  --item-hover: #292b2f;
-  --item-active: #34363b;
-  --primary-color: #8aa7ff;
-  --success-color: #66c58a;
-  --warn-color: #e0aa61;
-  --danger-color: #ee7d7d;
+  --font-ui: "Segoe UI", system-ui, sans-serif;
+  --font-code: ui-monospace, "Cascadia Code", Consolas, monospace;
+  --font-xl: 1.125rem;
+  --font-lg: 1.05rem;
+  --font-md: 1rem;
+  --font-sm: .9rem;
+  --font-xs: .81rem;
+  --background-primary: #0d0d0d;
+  --background-secondary: #121212;
+  --background-tertiary: #191919;
+  --background-elevated: #000000;
+  --background-inverse: #f3f3f3;
+  --background-code: #141517;
+  --text-primary: #f3f3f3;
+  --text-secondary: #c5c5c5;
+  --text-muted: #a6a6a6;
+  --text-inverse: #111111;
+  --border-color: #232323;
+  --item-hover: #191919;
+  --item-active: #232323;
+  --primary-color: #f9b635;
+  --text-on-primary: #111111;
+  --primary-color-opaque: #f9b63522;
+  --highlight-color: #665c00;
+  --success-color: #55b985;
+  --warn-color: #d5a64a;
+  --danger-color: #ef7373;
   --sidebar-width: 222px;
   --panel-width: min(420px, 38vw);
-  --duration-fast: 160ms;
-  --ease-smooth-out: cubic-bezier(.2,.8,.2,1);
+  --base-transition: cubic-bezier(.075,.82,.165,1);
+  --duration-fast: 250ms;
+  --duration-medium: 350ms;
+  --duration-slow: 400ms;
+  --ease-smooth-out: cubic-bezier(.22,1,.36,1);
   font-family: --font-ui;
   font-size: 14px;
+
+  @media (prefers-color-scheme: light) {
+    color-scheme: light;
+    --background-primary: #fafafa;
+    --background-secondary: #f3f3f3;
+    --background-tertiary: #ebebeb;
+    --background-elevated: #ffffff;
+    --background-inverse: #202020;
+    --background-code: #f0f1f3;
+    --text-primary: #202020;
+    --text-secondary: #505050;
+    --text-muted: #656565;
+    --text-inverse: #ffffff;
+    --border-color: #d4d4d4;
+    --item-hover: #e6e6e6;
+    --item-active: #dcdcdc;
+    --primary-color: #885600;
+    --text-on-primary: #ffffff;
+    --primary-color-opaque: #88560022;
+    --highlight-color: #f5d98c;
+    --success-color: #237447;
+    --warn-color: #805c12;
+    --danger-color: #b32e36;
+  }
 }
 
 * { box-sizing: border-box; }
 html, body, #app { width: 100%; height: 100%; margin: 0; }
-body { overflow: hidden; background: --background-primary; color: --text-primary; }
+body { overflow: hidden; background: --background-primary; color: --text-primary; overscroll-behavior: none; }
+#app { height: 100dvh; padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+@media (display-mode: standalone) { body { -webkit-tap-highlight-color: transparent; } }
+@media (forced-colors: active) { button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline-color: Highlight; } }
 button, input, textarea, select { color: inherit; font: inherit; }
 button { border: 0; cursor: pointer; }
 button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid --primary-color; outline-offset: 2px; }
 button:disabled { cursor: not-allowed; opacity: .45; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 code, pre, kbd { font-family: --font-code; }
-.primary { background: --primary-color; color: #11131a; font-weight: 650; }
+h1, h2, h3, h4, h5, h6, strong, b, th { font-weight: 500; }
+::selection { background: --highlight-color; }
+.primary { background: --primary-color; color: --text-on-primary; font-weight: 650; }
 .error-banner, .inline-error { color: --danger-color; }
 .spinning { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

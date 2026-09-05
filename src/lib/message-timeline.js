@@ -276,6 +276,59 @@ export function partitionMessageTimeline(timeline, streaming = false) {
   };
 }
 
+export function parseStructuredAgentMessage(message) {
+  if (message?.role !== 'user') return null;
+  const content = String(message.content ?? '').trim();
+  const subagentReport = /^<subagent_report\b([^>]*)>\s*([\s\S]*?)\s*<\/subagent_report>$/.exec(content);
+  if (subagentReport) {
+    const threadId = /\bthread_id="([^"]+)"/.exec(subagentReport[1])?.[1];
+    const title = /\btitle="([^"]+)"/.exec(subagentReport[1])?.[1];
+    if (threadId && title) return { type: 'subagent-report', threadId, title, body: subagentReport[2] };
+  }
+
+  const crossThreadMessage = /^<cross-message\b([^>]*)>\s*([\s\S]*?)\s*<\/cross-message>$/.exec(content);
+  if (crossThreadMessage) {
+    const sourceThreadId = /\bfrom_thread_id="([^"]+)"/.exec(crossThreadMessage[1])?.[1];
+    if (sourceThreadId) return { type: 'cross-thread-message', sourceThreadId, body: crossThreadMessage[2] };
+  }
+
+  return null;
+}
+
+export function groupAssistantTurns(messages) {
+  const grouped = [];
+  let turn = [];
+
+  const flushTurn = () => {
+    if (!turn.length) return;
+    const finalAssistantIndex = turn.findLastIndex((message) => message.role === 'assistant');
+    if (finalAssistantIndex < 0) {
+      grouped.push(...turn.map((message) => ({ message, workedMessages: [] })));
+      turn = [];
+      return;
+    }
+
+    grouped.push({
+      message: turn[finalAssistantIndex],
+      workedMessages: turn.filter((_, index) => index !== finalAssistantIndex),
+      workedStartedAt: turn.find((message) => message.role === 'assistant')?.createdAt,
+    });
+    turn = [];
+  };
+
+  for (const message of messages) {
+    if (message?.role === 'assistant' || message?.fromAgent === true || parseStructuredAgentMessage(message)) {
+      turn.push(message);
+      continue;
+    }
+    flushTurn();
+    grouped.push({ message, workedMessages: [] });
+  }
+  flushTurn();
+
+  return grouped;
+}
+
 export function formatWorkedDuration(startValue, endValue) {
   const start = Date.parse(startValue);
   const end = Date.parse(endValue);

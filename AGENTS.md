@@ -20,7 +20,7 @@
 - Optional remote actions must remain gated by methods advertised by `rpc:discover`. Do not add legacy method, renamed-field, authentication, or unsupported-version fallbacks.
 - Preserve the socket model: one global `/rpc` connection and one `/rpc/conversations/streams/:id` connection for the selected thread. Close the conversation socket on thread change, disconnect, or unmount.
 - Treat `conversations:context` as authoritative recovery. Sequence gaps trigger recovery rather than inferred replay; projection refreshes must preserve loaded older messages and local composer state.
-- API keys travel only in the WebSocket authentication subprotocol, never in URLs. IndexedDB may store only the connection fields enforced by `src/storage/connections.js`; remote messages, UI state, and attachment bytes stay in memory.
+- API keys travel only in the WebSocket authentication subprotocol, never in URLs. IndexedDB may store only the connection fields and the user-approved AIVAX access token enforced by `src/storage/connections.js`; remote messages, UI state, and attachment bytes stay in memory.
 - Remote attachment reads use conversation-owned `messageId` and `attachmentId` with bounded chunks. Do not send caller-provided host paths; revoke in-memory Blob URLs when replaced or unmounted.
 - Keep browser-independent transformations in `src/lib/` or `src/state/` and UI lifecycle behavior in Preact components. Follow adjacent tests when extending either layer.
 
@@ -32,6 +32,7 @@ Run from the project root with Bun:
 - `bun run styles:watch` — rebuild XCSS continuously while editing styles.
 - `bun test tests/<name>.test.js` or `bun test tests/<name>.test.jsx` — run a focused test file.
 - `bun test` — run the complete test suite.
+- `bun scripts/test-relay-e2e.mjs` — real-socket relay end-to-end check against a local v2 relay peer; runs in its own process because DOM tests replace `globalThis.WebSocket`.
 - `bun run build` — regenerate styles and produce the static site in `dist/`.
 - `bun run preview` — serve the existing production build locally.
 
