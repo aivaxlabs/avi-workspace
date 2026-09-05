@@ -153,6 +153,10 @@ describe('App connections and workspace lifecycle', () => {
     const style = document.documentElement.style;
     try {
       await renderApp();
+      expect(style.getPropertyValue('--app-height')).toBe('');
+      const input = document.createElement('textarea');
+      document.body.append(input);
+      act(() => input.focus());
       expect(style.getPropertyValue('--app-height')).toBe(`${window.innerHeight}px`);
       viewport.height = window.innerHeight - 300;
       viewport.offsetTop = 24;
@@ -174,6 +178,13 @@ describe('App connections and workspace lifecycle', () => {
       expect(style.getPropertyValue('--app-height')).toBe(`${window.innerHeight}px`);
       expect(style.getPropertyValue('--app-offset-top')).toBe('0px');
       expect(style.getPropertyValue('--keyboard-inset')).toBe('0px');
+      viewport.height = window.innerHeight - 48;
+      act(() => input.blur());
+      act(() => viewport.dispatchEvent(new window.Event('resize')));
+      expect(style.getPropertyValue('--app-height')).toBe('');
+      expect(style.getPropertyValue('--app-offset-top')).toBe('');
+      expect(style.getPropertyValue('--keyboard-inset')).toBe('');
+      input.remove();
       act(() => render(null, root));
       act(() => {
         viewport.dispatchEvent(new window.Event('resize'));

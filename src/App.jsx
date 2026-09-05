@@ -47,6 +47,10 @@ export function App() {
     const style = document.documentElement.style;
     const syncViewport = () => {
       if (viewport.scale !== 1) return;
+      if (!document.activeElement?.matches('input, textarea, [contenteditable="true"]')) {
+        for (const property of ['--app-height', '--app-offset-top', '--keyboard-inset']) style.removeProperty(property);
+        return;
+      }
       style.setProperty('--app-height', `${viewport.height}px`);
       style.setProperty('--app-offset-top', `${viewport.offsetTop}px`);
       style.setProperty('--keyboard-inset', `${Math.max(0, window.innerHeight - viewport.height)}px`);
@@ -55,10 +59,14 @@ export function App() {
     viewport.addEventListener('resize', syncViewport);
     viewport.addEventListener('scroll', syncViewport);
     window.addEventListener('resize', syncViewport);
+    document.addEventListener('focusin', syncViewport);
+    document.addEventListener('focusout', syncViewport);
     return () => {
       viewport.removeEventListener('resize', syncViewport);
       viewport.removeEventListener('scroll', syncViewport);
       window.removeEventListener('resize', syncViewport);
+      document.removeEventListener('focusin', syncViewport);
+      document.removeEventListener('focusout', syncViewport);
       for (const property of ['--app-height', '--app-offset-top', '--keyboard-inset']) style.removeProperty(property);
     };
   }, []);
