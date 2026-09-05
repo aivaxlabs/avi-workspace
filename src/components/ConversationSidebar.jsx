@@ -70,17 +70,18 @@ function ThreadRow({ item, selected, status, folderLabel, folderTitle, tagDots, 
         class="thread-open"
         aria-label={`${item.title || 'New chat'}${status.state !== 'idle' ? ` — ${status.label}` : ''}`}
         aria-current={selected ? 'page' : undefined}
+        title={`${item.title || 'New chat'}${folderTitle ? ` — ${folderTitle}` : ''}`}
         onClick={() => { onSelect(item.id); onClose?.(); }}
       >
-        <i class={`thread-status ${status.state} ${STATUS_ICONS[status.state]}${status.state === 'working' ? ' spinning' : ''}`} title={status.label} aria-label={status.label} />
         <span>
           <strong>
             {item.title || 'New chat'}
             {item.createdBy === 'agent' && <i class="ri-robot-2-line agent-thread-icon" title="Created by an agent" aria-label="Created by an agent" />}
             {tagDots.length > 0 && <span class="row-tag-dots">{tagDots}</span>}
           </strong>
-          <small title={folderTitle}>{folderLabel}</small>
+          <small class="sr-only" title={folderTitle}>{folderLabel}</small>
         </span>
+        {status.state !== 'idle' && <i class={`thread-status ${status.state} ${STATUS_ICONS[status.state]}${status.state === 'working' ? ' spinning' : ''}`} title={status.label} aria-label={status.label} />}
       </button>
       <button
         type="button"
@@ -515,7 +516,7 @@ export function ConversationSidebar({
         {Array.isArray(bots) && (
           <div class="nav-section bots-section">
             <div class="sidebar-section-header">
-              <strong><span>Bots</span><small>{botsWithStatus.length}</small></strong>
+              <strong><i class="ri-robot-2-line" aria-hidden="true" /><span>Bots</span><small class="sr-only">{botsWithStatus.length}</small></strong>
               <span class="section-actions">
                 {onSnoozeBots && (
                   <button
@@ -538,6 +539,7 @@ export function ConversationSidebar({
                 {botsWithStatus.map((bot) => {
                   const menuOpen = menu?.kind === 'bot' && menu.id === bot.id;
                   const snoozed = snoozeRemainingText(bot.snooze);
+                  const avatarSeed = [...(bot.iconSeed || bot.id || bot.name)].reduce((seed, char) => (seed * 31 + char.charCodeAt(0)) >>> 0, 0);
                   return (
                     <li key={bot.id} class={`bot-row${bot.conversationId === selectedId ? ' active' : ''}${menuOpen ? ' menu-open' : ''}`}>
                       <button
@@ -545,12 +547,19 @@ export function ConversationSidebar({
                         class="bot-open"
                         aria-label={`${bot.name} — ${bot.status.label}`}
                         disabled={!bot.conversationId}
-                        title={bot.conversationId ? undefined : 'This bot has no conversation yet'}
+                        title={bot.conversationId ? `${bot.name} — ${snoozed ? `Snoozed ${snoozed}` : bot.status.label}` : 'This bot has no conversation yet'}
                         onClick={() => { if (bot.conversationId) { onSelect(bot.conversationId); onClose?.(); } }}
                       >
-                        <i class={`bot-status-dot ${bot.status.state}`} title={bot.status.label} aria-label={bot.status.label} />
-                        <span><strong>{bot.name}</strong><small>{snoozed ? `Snoozed ${snoozed}` : bot.status.label}</small></span>
-                        {bot.attentionCount > 0 && <b class="bot-attention" aria-label={`${bot.attentionCount} action${bot.attentionCount === 1 ? '' : 's'} need attention`}>{bot.attentionCount}</b>}
+                        <svg class="bot-avatar" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+                          <circle cx="12" cy="12" r="12" fill={['#2a9d8f', '#e9c46a', '#f4a261', '#e76f51'][avatarSeed % 4]} />
+                          <g transform={`translate(${avatarSeed % 3 - 1} 0)`} fill="#263238">
+                            <circle cx="8" cy="10" r="1" /><circle cx="16" cy="10" r="1" />
+                            <path d="M9 15 Q12 17 15 15" fill="none" stroke="#263238" stroke-width="1" stroke-linecap="round" />
+                          </g>
+                        </svg>
+                        <span><strong>{bot.name}</strong><small class="sr-only">{snoozed ? `Snoozed ${snoozed}` : bot.status.label}</small></span>
+                        {bot.attentionCount > 0 ? <b class="bot-attention" aria-label={`${bot.attentionCount} action${bot.attentionCount === 1 ? '' : 's'} need attention`}>{bot.attentionCount}</b>
+                          : <i class={`bot-status ${bot.status.state} ${bot.status.state === 'sleep' ? 'ri-moon-line' : bot.status.state === 'working' ? 'ri-loader-4-line spinning' : bot.status.state === 'disabled' ? 'ri-checkbox-blank-circle-line' : 'ri-circle-fill'}`} title={bot.status.label} aria-label={bot.status.label} />}
                       </button>
                       <button type="button" class="bot-menu" aria-label={`Actions for ${bot.name}`} aria-haspopup="menu" aria-expanded={menuOpen} onClick={(event) => toggleMenu('bot', bot.id, event.currentTarget, bot)}><i class="ri-more-2-line" /></button>
                     </li>
@@ -565,7 +574,7 @@ export function ConversationSidebar({
 
         <div class="nav-section folder-conversations">
           <div class="sidebar-section-header">
-            <strong><span>Conversations</span><small>{visibleConversations.length}</small></strong>
+            <strong><i class="ri-time-line" aria-hidden="true" /><span>Conversations</span><small class="sr-only">{visibleConversations.length}</small></strong>
             {(Array.isArray(tags) || onSaveTags) && (
               <button
                 type="button"

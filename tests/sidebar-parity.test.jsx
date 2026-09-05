@@ -83,7 +83,10 @@ describe('sidebar Desktop parity', () => {
     expect(root.querySelector('.working-group .thread-open small').title).toBe('C:\\Code\\avi');
     const sectionHeaders = [...root.querySelectorAll('.sidebar-section-header')];
     expect(sectionHeaders.map((header) => header.querySelector('span').textContent)).toEqual(['Bots', 'Conversations', 'Working', 'Review', 'Folders']);
-    expect(sectionHeaders.every((header) => !header.querySelector(':scope > strong > i'))).toBeTrue();
+    expect(sectionHeaders.slice(0, 2).every((header) => header.querySelector(':scope > strong > i[aria-hidden="true"]'))).toBeTrue();
+    expect(root.querySelector('.bot-avatar')).not.toBeNull();
+    expect(root.querySelector('.working-group .thread-open > :last-child').classList.contains('thread-status')).toBeTrue();
+    expect(root.querySelector('.working-group .thread-open small').classList.contains('sr-only')).toBeTrue();
     expect(sectionHeaders.map((header) => header.querySelector('small')?.textContent ?? null)).toEqual(['1', '2', '1', '1', null]);
     expect(root.querySelector('[aria-label="Snooze bots"]')).not.toBeNull();
     expect(root.querySelector('[aria-label="New bot"]')).not.toBeNull();
