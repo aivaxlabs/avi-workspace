@@ -152,7 +152,13 @@ h1, h2, h3, h4, h5, h6, strong, b, th {
 @media (max-width: 860px) {
     #app {
         position: fixed;
+        inset: 0;
+        height: auto;
+    }
+
+    #app:has(input:focus, textarea:focus, [contenteditable="true"]:focus) {
         top: var(--app-offset-top);
+        bottom: auto;
         height: var(--app-height);
     }
 
@@ -1758,10 +1764,11 @@ h1, h2, h3, h4, h5, h6, strong, b, th {
     }
 
     .composer-wrap {
-        right: 6px;
+        right: 8px;
         bottom: 0;
-        left: 6px;
+        left: 8px;
         width: auto;
+        padding-bottom: max(8px, var(--safe-bottom));
         transform: none;
     }
 
@@ -1776,13 +1783,13 @@ h1, h2, h3, h4, h5, h6, strong, b, th {
 
     .composer-wrap.is-compact .composer-expand {
         width: 100%;
-        min-height: calc(48px + var(--safe-bottom));
+        min-height: 48px;
         display: flex;
         align-items: center;
         gap: 9px;
-        padding: 0 15px var(--safe-bottom);
+        padding: 0 15px;
         border: 1px solid var(--border-color);
-        border-radius: 18px 18px 0 0;
+        border-radius: 18px;
         background: var(--background-tertiary);
         color: var(--text-muted);
         text-align: left;
@@ -1812,7 +1819,7 @@ h1, h2, h3, h4, h5, h6, strong, b, th {
     }
 
     .composer {
-        border-radius: 18px 18px 0 0;
+        border-radius: 18px;
     }
 
     .composer > textarea {
@@ -1826,7 +1833,7 @@ h1, h2, h3, h4, h5, h6, strong, b, th {
         align-items: center;
         flex-direction: row;
         gap: 4px;
-        padding: 4px 6px max(6px, var(--safe-bottom));
+        padding: 4px 6px 6px;
     }
 
     .composer > footer .composer-controls, .composer > footer .composer-submit-row {
@@ -3574,6 +3581,10 @@ h1, h2, h3, h4, h5, h6, strong, b, th {
     }
 
     .workspace-header > .workspace-heading {
+        display: block;
+    }
+
+    .workspace-header > .workspace-heading > strong {
         display: block;
     }
 
