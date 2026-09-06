@@ -1,7 +1,10 @@
 import { defineConfig } from 'vite';
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
 import preact from '@preact/preset-vite';
+
+// Vite 7 and esbuild disagree on Windows junction paths; remove when Vite handles linked working directories.
+process.chdir(realpathSync.native(process.cwd()));
 
 const buildId = randomBytes(6).toString('hex');
 

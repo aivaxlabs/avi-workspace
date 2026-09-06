@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun run styles && vite",
+    "dev": "bun run --parallel styles:watch dev:vite",
+    "dev:vite": "vite",
     "styles": "cascadium build -d styles -x .xcss -o src/styles.css --p:pretty true --p:filenametag relative",
     "styles:watch": "cascadium watch -d styles -x .xcss -o src/styles.css --p:pretty true --p:filenametag relative",
     "test": "bun test",

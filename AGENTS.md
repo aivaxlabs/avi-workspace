@@ -28,7 +28,7 @@
 Run from the project root with Bun:
 
 - `bun install` — install dependencies.
-- `bun run dev` — regenerate styles, then start Vite.
+- `bun run dev` — regenerate styles, then run Cascadium watch and Vite in parallel with `bun run --parallel`.
 - `bun run styles:watch` — rebuild XCSS continuously while editing styles.
 - `bun test tests/<name>.test.js` or `bun test tests/<name>.test.jsx` — run a focused test file.
 - `bun test` — run the complete test suite.
