@@ -321,7 +321,7 @@ h1, h2, h3, h4, h5, h6, strong, b, th {
     border: 0;
     background: transparent;
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: inherit;
     cursor: pointer;
 }
 
@@ -331,10 +331,6 @@ h1, h2, h3, h4, h5, h6, strong, b, th {
 
 .worked-summary > i, .thinking-summary > i {
     font-size: 15px;
-}
-
-.worked-summary {
-    font-size: 12px;
 }
 
 .worked-details, .thinking-details {
