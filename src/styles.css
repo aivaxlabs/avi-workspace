@@ -1763,7 +1763,7 @@ h1, h2, h3, h4, h5, h6, strong, b, th {
 
     .composer-wrap {
         right: 6px;
-        bottom: calc(8px + var(--safe-bottom));
+        bottom: 0;
         left: 6px;
         width: auto;
         transform: none;
@@ -1780,13 +1780,13 @@ h1, h2, h3, h4, h5, h6, strong, b, th {
 
     .composer-wrap.is-compact .composer-expand {
         width: 100%;
-        min-height: 48px;
+        min-height: calc(48px + var(--safe-bottom));
         display: flex;
         align-items: center;
         gap: 9px;
-        padding: 0 15px;
+        padding: 0 15px var(--safe-bottom);
         border: 1px solid var(--border-color);
-        border-radius: 18px;
+        border-radius: 18px 18px 0 0;
         background: var(--background-tertiary);
         color: var(--text-muted);
         text-align: left;
@@ -1816,7 +1816,7 @@ h1, h2, h3, h4, h5, h6, strong, b, th {
     }
 
     .composer {
-        border-radius: 18px;
+        border-radius: 18px 18px 0 0;
     }
 
     .composer > textarea {
@@ -1830,7 +1830,7 @@ h1, h2, h3, h4, h5, h6, strong, b, th {
         align-items: center;
         flex-direction: row;
         gap: 4px;
-        padding: 4px 6px 6px;
+        padding: 4px 6px max(6px, var(--safe-bottom));
     }
 
     .composer > footer .composer-controls, .composer > footer .composer-submit-row {
@@ -3659,11 +3659,11 @@ h1, h2, h3, h4, h5, h6, strong, b, th {
     }
 
     .conversation-scroll {
-        padding: 22px 12px calc(var(--composer-clearance, 134px) + 24px + var(--safe-bottom));
+        padding: 22px 12px calc(var(--composer-clearance, 134px) + 16px);
     }
 
     .scroll-to-bottom {
-        bottom: calc(var(--composer-clearance, 134px) + 16px + var(--safe-bottom));
+        bottom: calc(var(--composer-clearance, 134px) + 8px);
     }
 
     .mobile-overlay-backdrop {
