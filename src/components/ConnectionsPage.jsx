@@ -145,9 +145,23 @@ export function ConnectionsPage({ statuses, onEnter, onCheck, onCancelOpen, open
 
   return <main class="connections-page">
     <header class="connections-header">
-      <div><span class="wordmark"><img src="avi.png" alt="" width="22" height="22" />AVI</span><h1>Connections</h1><p>Remote Avi instances available to this browser.</p></div>
-      <div class="connection-actions"><button class="primary" onClick={() => openForm({ ...EMPTY_FORM })}><i class="ri-add-line" /> Add connection</button><button onClick={() => { setAivaxError(''); setAivaxOpen(true); }}><i class="ri-login-box-line" /> {accountToken ? 'AIVAX account' : 'Login with AIVAX'}</button>{accountToken && <button disabled={aivaxBusy} onClick={() => loadDevices(null, accountToken)}>Refresh devices</button>}</div>
+      <span class="wordmark"><img src="avi.png" alt="" width="32" height="32" />Avi <span>Workspace</span></span>
+      <a href="https://github.com/aivaxlabs/avi-workspace" target="_blank" rel="noopener noreferrer"><i class="ri-github-fill" aria-hidden="true" /> GitHub <i class="ri-arrow-right-up-line" aria-hidden="true" /><span class="sr-only"> (opens in a new tab)</span></a>
     </header>
+    <div class="connections-intro"><h1>Your Avi, wherever you are.</h1><p>Connect to your devices and pick up where you left off.</p></div>
+    <section class="connection-options" aria-label="Connect your Avi">
+      <div class="aivax-connect">
+        <span class="connect-eyebrow"><i class={accountToken ? 'ri-checkbox-circle-line' : 'ri-cloud-line'} aria-hidden="true" />{accountToken ? 'ACCOUNT LINKED' : 'CONNECT WITH AIVAX'}</span>
+        <h2>{accountToken ? 'Your devices. One account.' : 'Bring your Avi devices together.'}</h2>
+        <p>{accountToken ? 'Your account is linked. Online Avi devices appear below, ready to open in this browser.' : 'Link your AIVAX account to find your online Avi devices automatically. No URLs to copy.'}</p>
+        <button class="primary" onClick={() => { setAivaxError(''); setAivaxOpen(true); }}>{accountToken ? 'AIVAX account' : 'Login with AIVAX'}<i class="ri-arrow-right-line" aria-hidden="true" /></button>
+      </div>
+      <div class="direct-connect">
+        <i class="ri-computer-line" aria-hidden="true" /><h2>Connect directly</h2><p>Have an Avi URL and API key? Add your instance directly to this browser.</p>
+        <button onClick={() => openForm({ ...EMPTY_FORM })}><i class="ri-add-line" aria-hidden="true" /> Add connection</button>
+      </div>
+    </section>
+    <div class="connections-list-heading"><div><h2>Connections <span>{connections.length + remoteConnections.length}</span></h2><p>Your saved instances and available devices.</p></div>{accountToken && <button disabled={aivaxBusy} onClick={() => loadDevices(null, accountToken)}><i class={aivaxBusy ? 'ri-refresh-line spinning' : 'ri-refresh-line'} aria-hidden="true" /> Refresh devices</button>}</div>
     {error && <p class="error-banner" role="alert">{error}</p>}
     {!aivaxOpen && aivaxError && <p role="alert" class="error-banner">{aivaxError}</p>}
     {!aivaxOpen && aivaxBusy && <p role="status">Loading connected devices...</p>}
@@ -155,7 +169,8 @@ export function ConnectionsPage({ statuses, onEnter, onCheck, onCancelOpen, open
       {[...connections, ...remoteConnections].map((connection) => {
         const status = statuses[connection.id] ?? (connection.relay ? { status: 'online', detail: 'Available through your AIVAX account' } : { status: 'checking', detail: 'Checking...' });
         return <article class="connection-card" key={connection.id}>
-          <header><div><h2>{connection.label}</h2><code>{connection.serverUrl}</code></div><span class={`connection-status ${status.status}`}><i />{status.status}</span></header>
+          <div class="connection-kind"><i class={connection.relay ? 'ri-cloud-line' : 'ri-computer-line'} aria-hidden="true" /><span>{connection.relay ? 'AIVAX device' : 'Direct connection'}</span></div>
+          <header><div><h2>{connection.label}</h2><code title={connection.serverUrl}>{connection.serverUrl}</code></div><span class={`connection-status ${status.status}`}><i />{status.status}</span></header>
           <p>{status.detail || (status.status === 'online' ? 'RPC API v1 available' : 'Remote instance unavailable')}</p>
           <footer>
             <button class="primary" disabled={(!connection.relay && status.status !== 'online') || openingId !== null} onClick={() => onEnter(connection, [...connections, ...remoteConnections])}>{openingId === connection.id ? 'Opening...' : 'Open workspace'}</button>

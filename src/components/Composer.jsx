@@ -25,7 +25,7 @@ function serializeDraft({ permissionMode, model, reasoningEffort, workMode, ultr
   return { permissionMode, model, reasoningEffort: reasoningEffort || null, workMode, ultraMode, draftText: text, attachments };
 }
 
-export function Composer({ client, state, models, discovery, draftCache, messageDeliveryMode = 'queue', compact = false, onExpand, onSent, onStop, onSideChat, onOpenTasks, onOpenAgents, onQueueOrder, onError, composerRef }) {
+export function Composer({ client, state, models, discovery, draftCache, intelligenceLevels = [], messageDeliveryMode = 'queue', compact = false, onExpand, onSent, onStop, onSideChat, onOpenTasks, onOpenAgents, onQueueOrder, onError, composerRef }) {
   const conversation = state.conversation;
   const snapshot = state.composer;
   const goal = conversation.goal;
@@ -77,6 +77,13 @@ export function Composer({ client, state, models, discovery, draftCache, message
   const [activeOption, setActiveOption] = useState(0);
   const [openMenu, setOpenMenu] = useState(null);
   const [modelSubmenu, setModelSubmenu] = useState(null);
+  const [advancedPickerOpen, setAdvancedPickerOpen] = useState(false);
+  const sliderLevels = intelligenceLevels.filter((level) => models.some((item) => item.id === level?.modelId)).map((level) => {
+    const item = models.find((item) => item.id === level.modelId);
+    return { ...level, reasoningEffort: level.reasoningEffort ?? (item.reasoning.includes('medium') ? 'medium' : item.reasoning[0] ?? '') };
+  });
+  const hasModelSlider = sliderLevels.length >= 3;
+  const sliderIndex = Math.max(0, sliderLevels.findIndex((level) => level.modelId === model && level.reasoningEffort === reasoningEffort));
   const [busy, setBusy] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [saveStatus, setSaveStatus] = useState(() => (supportsMethod(discovery, METHODS.composerSave) ? 'saved' : 'unsupported'));
@@ -464,8 +471,18 @@ export function Composer({ client, state, models, discovery, draftCache, message
         <div class="composer-submit-row">
           <span class={`composer-save-status is-${saveStatus}`} role="status">{pasting ? 'Reading attachments...' : saveStatus === 'saving' ? 'Saving...' : saveStatus === 'saved' ? 'Saved' : saveStatus === 'unsynced' ? 'Not synced; keep this tab open' : saveStatus === 'pending' ? 'Waiting to sync' : 'Draft only in this tab'}{saveStatus === 'unsynced' && <button type="button" class="composer-save-retry" onClick={retrySave}>Retry</button>}</span>
           <div class="composer-menu-holder model-menu-holder">
-            <button type="button" class="model-chip" aria-haspopup="menu" aria-expanded={openMenu === 'model'} onClick={() => { setOpenMenu(openMenu === 'model' ? null : 'model'); setModelSubmenu(null); }}><span>{selectedModel?.name ?? model}</span>{reasoningEffort && <small> - {reasoningEffort}</small>}<i class="ri-arrow-down-s-line" /></button>
-            {openMenu === 'model' && <div class="composer-menu model-menu" role="menu" aria-label="Advanced model settings" onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setOpenMenu(null); setModelSubmenu(null); } }}>
+            <button type="button" class="model-chip" aria-haspopup={hasModelSlider ? 'dialog' : 'menu'} aria-expanded={openMenu === 'model'} onClick={() => { setOpenMenu(openMenu === 'model' ? null : 'model'); setModelSubmenu(null); setAdvancedPickerOpen(false); }}><span>{selectedModel?.name ?? model}</span>{reasoningEffort && <small> - {reasoningEffort}</small>}<i class="ri-arrow-down-s-line" /></button>
+            {openMenu === 'model' && hasModelSlider && !advancedPickerOpen && <div class="composer-menu model-menu intelligence-menu" role="dialog" aria-label="Choose intelligence level" onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setOpenMenu(null); root.current?.querySelector('.model-chip')?.focus(); } }}>
+              <div class="intelligence-slider" style={{ '--slider-fill': `${sliderIndex / (sliderLevels.length - 1) * 100}%`, '--slider-offset': `${13 - 26 * sliderIndex / (sliderLevels.length - 1)}px` }}>
+                <div class="intelligence-dots" aria-hidden="true">{sliderLevels.map((level, index) => <span key={index} class={index <= sliderIndex ? 'filled' : undefined} />)}</div>
+                <input type="range" min="0" max={sliderLevels.length - 1} step="1" value={sliderIndex} aria-label="Intelligence level" aria-valuetext={`${models.find((item) => item.id === sliderLevels[sliderIndex].modelId)?.name ?? sliderLevels[sliderIndex].modelId} - ${sliderLevels[sliderIndex].reasoningEffort || 'Default'}`} onInput={(event) => {
+                  const level = sliderLevels[Number(event.currentTarget.value)];
+                  setModel(level.modelId); setReasoningEffort(level.reasoningEffort);
+                }} />
+              </div>
+              <button type="button" class="model-reasoning-trigger" onClick={() => setAdvancedPickerOpen(true)}><span>Advanced</span><i class="ri-arrow-right-s-line" /></button>
+            </div>}
+            {openMenu === 'model' && (!hasModelSlider || advancedPickerOpen) && <div class="composer-menu model-menu" role="menu" aria-label="Advanced model settings" onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setOpenMenu(null); setModelSubmenu(null); } }}>
               <header class="advanced-menu-header"><span>Advanced</span><i class="ri-arrow-down-s-line" /></header>
               <div ref={modelHolderRef} class="model-submenu-holder" onMouseEnter={() => setModelSubmenu('model')} onMouseLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setModelSubmenu(null); }} onFocus={() => setModelSubmenu('model')} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setModelSubmenu(null); }} onKeyDown={(event) => { if (event.key === 'ArrowRight') { event.preventDefault(); setModelSubmenu('model'); queueMicrotask(() => event.currentTarget.querySelector('.model-reasoning-submenu button')?.focus()); } else if (event.key === 'ArrowLeft') { event.preventDefault(); setModelSubmenu(null); event.currentTarget.querySelector('.model-reasoning-trigger')?.focus(); } }}>
                 <button type="button" class="model-reasoning-trigger" role="menuitem" aria-label="Choose model" aria-haspopup="menu" aria-expanded={modelSubmenu === 'model'} onClick={() => setModelSubmenu(modelSubmenu === 'model' ? null : 'model')}><span>Model</span><span>{selectedModel?.name ?? model}<i class="ri-arrow-right-s-line" /></span></button>

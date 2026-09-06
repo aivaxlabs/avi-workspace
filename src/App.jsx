@@ -25,7 +25,7 @@ async function loadWorkspaceState(client, discovery, includeModels = false) {
       runningConversationIds: [], approvalPendingConversationIds: [], inputPendingConversationIds: [],
       semaphoreWaitingConversationIds: [], completedUnseenConversationIds: [],
     },
-    ...(modelCatalog ? { models: modelCatalog.models, messageDeliveryMode: modelCatalog.messageDeliveryMode } : {}),
+    ...(modelCatalog ? { models: modelCatalog.models, intelligenceLevels: modelCatalog.defaultModels?.intelligence?.levels ?? [], messageDeliveryMode: modelCatalog.messageDeliveryMode } : {}),
   };
 }
 

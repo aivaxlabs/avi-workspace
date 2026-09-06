@@ -1,22 +1,57 @@
 .connections-page {
-  height: 100%; overflow: auto; padding: calc(48px + env(safe-area-inset-top)) clamp(24px, 6vw, 96px) calc(48px + var(--safe-bottom)); background: --background-primary;
-  > .connections-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; max-width: 1180px; margin: 0 auto 32px;
-    > .connection-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-    h1 { margin: 12px 0 4px; font-size: 28px; font-weight: 620; }
-    p { margin: 0; color: --text-secondary; }
-    button { min-height: 38px; padding: 0 16px; border-radius: 7px; }
+  height: 100%; overflow: auto; padding: calc(28px + env(safe-area-inset-top)) clamp(24px, 6vw, 96px) calc(48px + var(--safe-bottom)); background: --background-primary;
+  > * { max-width: 1080px; margin-left: auto; margin-right: auto; }
+  button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; min-height: 44px; padding: 0 16px; border-radius: 7px; }
+  button:not(.primary) { background: --background-secondary; }
+  button:not(:disabled):hover { filter: brightness(.92); }
+  > .connections-header { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding-bottom: 24px; border-bottom: 1px solid --border-color;
+    > .wordmark { display: inline-flex; align-items: center; gap: 9px; font-size: 18px; font-weight: 650; letter-spacing: -.5px;
+      > img { width: 32px; height: 32px; padding: 3px; border-radius: 7px; background: #fafafa; object-fit: contain; }
+      > span { color: --text-secondary; font-weight: 400; }
+    }
+    > a { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; color: --text-secondary; text-decoration: none; border-radius: 4px;
+      &:hover { color: --text-primary; }
+      &:focus-visible { outline: 2px solid --primary-color; outline-offset: 4px; }
+      > .ri-github-fill { font-size: 20px; }
+    }
   }
-  > .connection-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1px; max-width: 1180px; margin: auto; background: --border-color; border: 1px solid --border-color; border-radius: 8px; overflow: hidden; }
+  > .connections-intro { margin-top: 52px; margin-bottom: 30px;
+    > h1 { margin: 0 0 10px; font-size: clamp(28px, 4vw, 42px); line-height: 1.15; letter-spacing: -1.4px; font-weight: 600; }
+    > p { margin: 0; color: --text-secondary; font-size: 16px; line-height: 1.6; }
+  }
+  > .connection-options { display: grid; grid-template-columns: 1.65fr 1fr; border: 1px solid --border-color; border-radius: 14px; overflow: hidden; margin-bottom: 48px;
+    > .aivax-connect { padding: 34px 36px; background: --background-inverse; color: --text-inverse;
+      > .connect-eyebrow { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 650; letter-spacing: 1.2px; opacity: .8; > i { font-size: 17px; } }
+      > h2 { margin: 23px 0 10px; font-size: 25px; font-weight: 550; letter-spacing: -.6px; }
+      > p { max-width: 47ch; margin: 0 0 24px; line-height: 1.7; opacity: .8; }
+      > button { background: #f9b635; color: #17130b; }
+    }
+    > .direct-connect { display: flex; flex-direction: column; align-items: flex-start; padding: 34px 32px; background: --background-secondary;
+      > i { font-size: 26px; color: --text-secondary; }
+      > h2 { margin: 20px 0 10px; font-size: 20px; font-weight: 550; letter-spacing: -.4px; }
+      > p { margin: 0 0 24px; max-width: 34ch; color: --text-secondary; line-height: 1.7; }
+      > button { margin-top: auto; border: 1px solid --border-color; background: --background-primary; }
+    }
+  }
+  > .connections-list-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 20px;
+    h2 { display: flex; align-items: center; gap: 10px; margin: 0 0 6px; font-size: 20px; font-weight: 600; > span { padding: 2px 8px; border-radius: 5px; background: --background-secondary; color: --text-secondary; font-size: 12px; } }
+    p { margin: 0; color: --text-secondary; font-size: 13px; }
+    > button { flex-shrink: 0; }
+  }
+  > .connection-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+  > .modal-backdrop { max-width: none; }
 }
-.wordmark { display: inline-flex; align-items: center; gap: 7px; color: --text-primary; font-size: 13px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; opacity: .62; > img { width: 22px; height: 22px; border-radius: 6px; object-fit: contain; } }
-.connection-card { min-height: 190px; display: flex; flex-direction: column; padding: 20px; background: --background-secondary;
+
+.connection-card { min-width: 0; min-height: 230px; display: flex; flex-direction: column; padding: 22px; background: --background-secondary; border: 1px solid --border-color; border-radius: 10px;
+  > .connection-kind { display: flex; align-items: center; gap: 8px; margin-bottom: 20px; color: --text-muted; font-size: 12px; > i { font-size: 19px; } }
   > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
     > div { min-width: 0; }
     > .connection-status { flex-shrink: 0; }
     h2 { margin: 0 0 6px; font-size: --font-md; font-weight: 620; overflow-wrap: anywhere; }
     code { display: block; max-width: min(210px, 100%); color: --text-secondary; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   }
-  > p { flex: 1; color: --text-secondary; font-size: --font-xs; }
+  > p { flex: 1; color: --text-secondary; font-size: --font-xs; line-height: 1.6; }
+  > footer { padding-top: 12px; }
   > footer { display: flex; gap: 6px;
     button { min-width: 34px; height: 34px; border-radius: 6px; background: transparent; }
     button:hover { background: --item-hover; }
@@ -32,7 +67,7 @@
   &.checking > i { animation: pulse 1s ease infinite; }
 }
 @keyframes pulse { 50% { opacity: .25; } }
-.empty-connections { grid-column: 1 / -1; min-height: 260px; display: grid; place-content: center; justify-items: center; padding: 40px; background: --background-secondary; text-align: center;
+.empty-connections { grid-column: 1 / -1; min-height: 210px; display: grid; place-content: center; justify-items: center; padding: 32px; border: 1px dashed --border-color; border-radius: 10px; text-align: center;
   > i { color: --text-muted; font-size: 28px; } h2 { margin: 16px 0 6px; font-size: --font-lg; } p { max-width: 390px; margin: 0; color: --text-secondary; }
 }
 .modal-backdrop { position: fixed; z-index: 40; inset: 0; display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; padding: 20px; background: rgb(0 0 0 / .58); }
@@ -52,12 +87,13 @@
 }
 @media (max-width: 640px) {
   .connections-page { padding: calc(20px + env(safe-area-inset-top)) 16px calc(20px + var(--safe-bottom));
-    > .connections-header { flex-direction: column; align-items: stretch; gap: 20px; margin-bottom: 24px;
-      > div { min-width: 0; }
-      h1 { margin-top: 16px; font-size: 26px; }
-      p { max-width: 32ch; line-height: 1.5; }
-      > .connection-actions { display: grid; grid-template-columns: minmax(0, 1fr); button { min-height: 44px; padding: 10px 14px; } }
+    > .connections-header { gap: 12px; padding-bottom: 16px; > .wordmark { font-size: 16px; gap: 6px; } }
+    > .connections-intro { margin-top: 32px; margin-bottom: 24px; > h1 { letter-spacing: -.8px; } }
+    > .connection-options { grid-template-columns: minmax(0, 1fr); margin-bottom: 32px;
+      > .aivax-connect, > .direct-connect { padding: 26px 22px; }
+      > .direct-connect { > i { display: none; } > h2 { margin-top: 0; } }
     }
+    > .connections-list-heading { flex-wrap: wrap; }
     > .connection-grid { grid-template-columns: minmax(0, 1fr); }
   }
   .connection-card { min-height: 180px; padding: 16px; > footer { flex-wrap: wrap; button { min-width: 44px; min-height: 44px; } } }

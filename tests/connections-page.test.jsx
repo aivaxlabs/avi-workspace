@@ -57,7 +57,7 @@ describe('ConnectionsPage', () => {
         render(h(ConnectionsPage, { statuses: {}, onCheck() {}, onEnter() {} }), root);
         await flush();
       });
-      const opener = root.querySelector('.connection-actions button');
+      const opener = [...root.querySelectorAll('button')].find((button) => button.textContent.includes('Add connection'));
       opener.focus();
       await act(async () => { opener.click(); await flush(); });
       await act(async () => { await flush(); });

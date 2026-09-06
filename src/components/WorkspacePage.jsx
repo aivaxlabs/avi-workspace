@@ -89,7 +89,7 @@ function AuxiliaryPanel({ tab, state, client, discovery, modal, panelRef, onOpen
   </div></aside>;
 }
 
-export function WorkspacePage({ connection, globalClient, discovery, models, messageDeliveryMode, conversations, folders, bots, tags, sidebarStatus, schedulerSnooze, onRefresh, onExit, connections = [], onSwitchConnection, connectionStatus, refreshError, switchingConnectionId, workspaceMemory }) {
+export function WorkspacePage({ connection, globalClient, discovery, models, intelligenceLevels, messageDeliveryMode, conversations, folders, bots, tags, sidebarStatus, schedulerSnooze, onRefresh, onExit, connections = [], onSwitchConnection, connectionStatus, refreshError, switchingConnectionId, workspaceMemory }) {
   const localMemory = useRef(new Map());
   const memory = workspaceMemory ?? localMemory.current;
   if (!memory.has(connection.id)) memory.set(connection.id, { selectedId: null, drafts: new Map() });
@@ -364,7 +364,7 @@ export function WorkspacePage({ connection, globalClient, discovery, models, mes
   }
   const sidebarProps = {
     bots: supportsMethod(discovery, METHODS.listBots) ? bots : undefined,
-    connection, connections, onSwitchConnection, switchingConnectionId, connectionStatus,
+    connection, connections, onSwitchConnection, switchingConnectionId, connectionStatus, globalClient, conversationClient: client,
     conversations,
     folders,
     models,
@@ -456,7 +456,7 @@ export function WorkspacePage({ connection, globalClient, discovery, models, mes
         if (!result?.conversation?.id) throw new Error('Avi could not fork this conversation.');
       } : undefined} />)}</div> : <div class="empty-chat"><span class="avi-mark large"><img src="avi.png" alt="" width="34" height="34" /></span><h1>{conversationTitle}</h1><p>Remote state stays authoritative on {connection.label}.</p></div>}</div>
       {awayFromBottom && <button type="button" class="scroll-to-bottom" aria-label="Scroll to latest message" title="Scroll to latest message" onClick={() => scrollToBottom('smooth')}><i class="ri-arrow-down-line" /></button>}
-      {client && state.conversation && <Composer key={state.conversation.id} client={client} state={state} discovery={conversationDiscovery} draftCache={savedWorkspace.drafts} models={models} messageDeliveryMode={messageDeliveryMode} compact={mobile && mobileComposerCompact} onExpand={() => {
+      {client && state.conversation && <Composer key={state.conversation.id} client={client} state={state} discovery={conversationDiscovery} draftCache={savedWorkspace.drafts} models={models} intelligenceLevels={intelligenceLevels} messageDeliveryMode={messageDeliveryMode} compact={mobile && mobileComposerCompact} onExpand={() => {
         setMobileComposerCompact(false);
         requestAnimationFrame(() => composerWrapRef.current?.querySelector('textarea')?.focus());
       }} onSent={onRefresh} onStop={() => client.request(METHODS.stop)} onSideChat={createSideChat} onOpenTasks={() => { setPanelTab('tasks'); setPanelOpen(true); }} onOpenAgents={() => { setPanelTab('agents'); setPanelOpen(true); }} onQueueOrder={applyQueueResult} onError={(value) => setError(value.message)} composerRef={composerWrapRef} />}

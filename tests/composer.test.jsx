@@ -183,6 +183,33 @@ function saveCalls(view) {
   return view.calls.filter((call) => call.method === METHODS.composerSave);
 }
 
+test('uses configured intelligence levels and saves the selected model and effort', async () => {
+  const view = mount(createState(), { intelligenceLevels: [
+    { modelId: 'model:one', reasoningEffort: 'low' },
+    { modelId: 'model:one', reasoningEffort: 'high' },
+    { modelId: 'model:two', reasoningEffort: null },
+  ] });
+  act(() => view.root.querySelector('.model-chip').click());
+  const slider = view.root.querySelector('input[type="range"]');
+  expect(slider.value).toBe('1');
+  act(() => { slider.value = '2'; slider.dispatchEvent(new window.Event('input', { bubbles: true })); });
+  expect(view.root.querySelector('.model-chip').textContent).toContain('Model Two');
+  expect(view.root.querySelector('.model-chip').textContent).toContain('medium');
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 350)); });
+  expect(view.calls.filter((call) => call.method === METHODS.composerSave).at(-1).params).toMatchObject({ model: 'model:two', reasoningEffort: 'medium' });
+  act(() => buttonWithText(view.root, 'Advanced').click());
+  expect(view.root.querySelector('[aria-label="Advanced model settings"]')).not.toBeNull();
+  view.unmount();
+});
+
+test('keeps the full picker when fewer than three configured models are available', () => {
+  const view = mount(createState(), { intelligenceLevels: [{ modelId: 'model:one' }, { modelId: 'model:two' }, { modelId: 'missing' }] });
+  act(() => view.root.querySelector('.model-chip').click());
+  expect(view.root.querySelector('input[type="range"]')).toBeNull();
+  expect(view.root.querySelector('[aria-label="Advanced model settings"]')).not.toBeNull();
+  view.unmount();
+});
+
 describe('composer parity', () => {
   test('omits the strip container when empty and restores it when tasks appear', () => {
     const state = createState({ tasks: [], subagents: [], rubberDucks: [], queue: { steer: [], queued: [] } });

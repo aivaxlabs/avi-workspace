@@ -17,7 +17,7 @@ function formatAge(timestamp) {
   return new Date(time).toLocaleDateString();
 }
 
-function DialogShell({ title, search = false, onClose, onKeyDown, initialFocusRef, children }) {
+export function DialogShell({ title, search = false, onClose, onKeyDown, initialFocusRef, children }) {
   const dialogRef = useRef(null);
   useModalFocus({ containerRef: dialogRef, onClose, initialFocusRef });
   return (

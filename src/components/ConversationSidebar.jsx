@@ -1,4 +1,5 @@
 import { createPortal } from 'preact/compat';
+import { ConnectionIndicator } from './ConnectionIndicator.jsx';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { buildFolderNavigation, FOLDER_GROUP_LIMIT, folderDisplayName } from '../lib/conversation-folders.js';
 import {
@@ -98,7 +99,7 @@ function ThreadRow({ item, selected, status, folderLabel, folderTitle, tagDots, 
 export function ConversationSidebar({
   collapsed, connection, conversations = [], folders = [], models = [], bots, tags,
   sidebarStatus, schedulerSnooze, selectedId,
-  connections = [], onSwitchConnection, switchingConnectionId, connectionStatus,
+  connections = [], onSwitchConnection, switchingConnectionId, connectionStatus, globalClient, conversationClient,
   onClose, onCollapse, onCreate, onExit, onSelect,
   onRename, onSearch, onArchive, onDelete, onFork, onSetConversationTags,
   onSaveTags, onSaveFolderColor,
@@ -506,7 +507,7 @@ export function ConversationSidebar({
             const next = connections.find((item) => item.id === event.currentTarget.value);
             if (next) onSwitchConnection(next);
           }}>{connections.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select> : <span class="instance-name">{connection.label}</span>}
-          <span class={`instance-status ${connectionStatus?.status ?? 'online'}`} role="status">{switchingConnectionId ? 'Switching instance...' : connectionStatus?.status ?? 'online'}</span>
+          <ConnectionIndicator globalClient={globalClient} conversationClient={conversationClient} status={connectionStatus} switching={switchingConnectionId} />
         </div>}
         <div class="new-chat-control">
           <button type="button" class="nav-action" aria-label="New chat" aria-haspopup="menu" aria-expanded={menu?.kind === 'picker'} disabled={!onCreate} title={onCreate ? undefined : 'This Avi instance does not allow creating new chats.'} onClick={(event) => toggleMenu('picker', null, event.currentTarget)}><i class="ri-add-line" /><span>New chat</span><i class="ri-arrow-down-s-line nav-action-chevron" /></button>
