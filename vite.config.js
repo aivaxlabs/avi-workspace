@@ -1,7 +1,9 @@
 import { defineConfig } from 'vite';
 import { readFileSync } from 'node:fs';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import preact from '@preact/preset-vite';
+
+const buildId = randomBytes(6).toString('hex');
 
 export default defineConfig({
   base: './',
@@ -32,5 +34,12 @@ export default defineConfig({
   build: {
     target: 'es2022',
     sourcemap: true,
+    rollupOptions: {
+      output: {
+        entryFileNames: `assets/[name]-[hash]-${buildId}.js`,
+        chunkFileNames: `assets/[name]-[hash]-${buildId}.js`,
+        assetFileNames: `assets/[name]-[hash]-${buildId}[extname]`,
+      },
+    },
   },
 });
