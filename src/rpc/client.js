@@ -1,4 +1,5 @@
 import { RPC_PROTOCOL } from './contracts.js';
+import { OrpcPeer, OrpcError, utf8Text } from './orpc.js';
 import { createAuthProtocols } from './url.js';
 import { RelaySocket } from './relay-socket.js';
 
@@ -12,7 +13,7 @@ export class RpcError extends Error {
 }
 
 export class RpcClient extends EventTarget {
-  constructor({ url, apiKey, relay = null, path = '/rpc', timeoutMs = 15_000, reconnect = true, WebSocketImpl = globalThis.WebSocket }) {
+  constructor({ url, apiKey, relay = null, path = '/rpc', timeoutMs = 60_000, reconnect = true, WebSocketImpl = globalThis.WebSocket }) {
     super();
     this.url = url;
     this.relay = relay;
@@ -24,8 +25,35 @@ export class RpcClient extends EventTarget {
     this.reconnect = reconnect;
     this.WebSocketImpl = WebSocketImpl;
     this.socket = null;
-    this.pending = new Map();
-    this.nextId = 1;
+    this.events = new Map();
+    this.metrics = { sentBytes: 0, receivedBytes: 0, completed: 0, failed: 0, cancelled: 0, latencyMs: null, latencyMinMs: null, latencyMaxMs: null, latencyTotalMs: 0, lastResponseAt: null, connectedAt: null, reconnects: 0 };
+    this.peer = new OrpcPeer({
+      send: (frame) => {
+        this.socket.send(frame);
+        this.metrics.sentBytes += frame.byteLength;
+      },
+      isOpen: () => this.socket?.readyState === this.WebSocketImpl.OPEN,
+      bufferedAmount: () => this.socket?.bufferedAmount ?? 0,
+      onError: (error) => {
+        this.dispatchEvent(new CustomEvent('protocol-error', { detail: error }));
+        this.socket?.close(error.code === 'LIMIT' ? 1009 : 1002, error.code);
+      },
+      onRequest: (method, bytes) => {
+        const content = utf8Text(bytes);
+        const event = JSON.parse(content);
+        if (!event.eventId || !Number.isFinite(event.expiresAt) || event.expiresAt < Date.now()) throw new OrpcError('Invalid or expired event');
+        for (const [id, entry] of this.events) if (entry.expiresAt < Date.now()) this.events.delete(id);
+        const previous = this.events.get(event.eventId);
+        if (previous) {
+          if (previous.content !== content || previous.method !== method) throw new OrpcError('Conflicting event identifier');
+          return new TextEncoder().encode('OK');
+        }
+        if (this.events.size >= 4096) throw new OrpcError('Event acceptance limit exceeded', 'LIMIT');
+        this.dispatchEvent(new CustomEvent('notification', { detail: { method: method.replace('.', ':'), params: event.params } }));
+        this.events.set(event.eventId, { content, method, expiresAt: event.expiresAt });
+        return new TextEncoder().encode('OK');
+      },
+    });
     this.closed = false;
     this.reconnectAttempt = 0;
     this.reconnectTimer = null;
@@ -63,6 +91,8 @@ export class RpcClient extends EventTarget {
           return;
         }
         opened = true;
+        if (this.metrics.connectedAt !== null) this.metrics.reconnects++;
+        this.metrics.connectedAt = Date.now();
         cleanupInitial();
         if (this.relay) this.stableTimer = setTimeout(() => { if (this.socket === socket) this.reconnectAttempt = 0; }, 30_000);
         else this.reconnectAttempt = 0;
@@ -87,64 +117,48 @@ export class RpcClient extends EventTarget {
     return this.connectPromise;
   }
 
-  request(method, params, { timeoutMs = this.timeoutMs } = {}) {
-    if (this.socket?.readyState !== this.WebSocketImpl.OPEN) return Promise.reject(new Error('RPC socket is not connected.'));
-    const id = this.nextId++;
-    const message = { jsonrpc: '2.0', id, method, ...(params === undefined ? {} : { params }) };
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`RPC request timed out after ${timeoutMs}ms: ${method}${this.relay ? '; request outcome is unknown. Do not resend without checking remote state.' : ''}`));
-      }, timeoutMs);
-      this.pending.set(id, { resolve, reject, timer });
-      try { this.socket.send(JSON.stringify(message)); }
-      catch (error) { clearTimeout(timer); this.pending.delete(id); reject(error); }
-    });
+  async request(method, params, { timeoutMs = this.timeoutMs, signal } = {}) {
+    const content = JSON.stringify({ operationId: crypto.randomUUID(), expiresAt: Date.now() + 180_000, params });
+    const startedAt = performance.now();
+    let response;
+    try {
+      const bytes = await this.peer.call(method.replace(':', '.'), new TextEncoder().encode(content), { attemptMs: timeoutMs, signal });
+      this.metrics.completed++;
+      this.metrics.latencyMs = performance.now() - startedAt;
+      this.metrics.latencyMinMs = Math.min(this.metrics.latencyMinMs ?? Infinity, this.metrics.latencyMs);
+      this.metrics.latencyMaxMs = Math.max(this.metrics.latencyMaxMs ?? 0, this.metrics.latencyMs);
+      this.metrics.latencyTotalMs += this.metrics.latencyMs;
+      this.metrics.lastResponseAt = Date.now();
+      response = bytes;
+    } catch (error) {
+      if (error.code === 'CANCELLED') this.metrics.cancelled++;
+      else this.metrics.failed++;
+      throw error;
+    }
+    response = JSON.parse(utf8Text(response));
+    if (response.error) throw new RpcError(response.error.message, response.error.code, response.error.data);
+    return response.result;
   }
 
   notify(method, params) {
-    if (this.socket?.readyState !== this.WebSocketImpl.OPEN) throw new Error('RPC socket is not connected.');
-    this.socket.send(JSON.stringify({ jsonrpc: '2.0', method, ...(params === undefined ? {} : { params }) }));
+    return this.request(method, params);
   }
 
   async handleMessage(raw, source = this.socket) {
-    let documents;
-    try {
-      const text = typeof raw === 'string'
-        ? raw
-        : raw instanceof Blob
-          ? await raw.text()
-          : new TextDecoder().decode(raw instanceof ArrayBuffer ? raw : raw.buffer);
-      if (this.socket !== source || source?.readyState !== this.WebSocketImpl.OPEN || this.closed) return;
-      const parsed = JSON.parse(text);
-      documents = Array.isArray(parsed) ? parsed : [parsed];
-    } catch {
-      this.dispatchEvent(new CustomEvent('protocol-error', { detail: new Error('RPC server returned invalid JSON.') }));
-      return;
-    }
-    for (const document of documents) {
-      if (!document || typeof document !== 'object' || Array.isArray(document)) {
-        this.dispatchEvent(new CustomEvent('protocol-error', { detail: new Error('RPC server returned an invalid JSON-RPC document.') }));
-        continue;
-      }
-      if (Object.hasOwn(document, 'id')) {
-        const pending = this.pending.get(document.id);
-        if (!pending) continue;
-        clearTimeout(pending.timer);
-        this.pending.delete(document.id);
-        if (document.error) pending.reject(new RpcError(document.error.message, document.error.code, document.error.data));
-        else pending.resolve(document.result);
-      } else if (document.method) {
-        this.dispatchEvent(new CustomEvent('notification', { detail: { method: document.method, params: document.params } }));
-      }
-    }
+    const value = raw instanceof Blob ? await raw.arrayBuffer() : raw;
+    if (this.socket !== source || source?.readyState !== this.WebSocketImpl.OPEN || this.closed) return;
+    this.metrics.receivedBytes += value?.byteLength ?? 0;
+    this.peer.receive(value);
   }
 
   handleClose(event, source = this.socket) {
     if (this.socket !== source) return;
     clearTimeout(this.stableTimer);
     if (this.relay && event.retryable === false) this.closed = true;
-    this.rejectPending(new Error('RPC connection closed before the request completed; request outcome is unknown. Commands are not automatically resent.'));
+    if ([1002, 1008, 1009, 4003].includes(event.code) || event.retryable === false) {
+      this.closed = true;
+      this.peer.terminate(new OrpcError(event.reason || 'Channel rejected', event.code === 1009 ? 'LIMIT' : 'PROTOCOL'));
+    } else this.peer.channelFailed();
     this.dispatchStatus('offline', event.reason || `Connection closed (${event.code}).`);
     this.dispatchEvent(new CustomEvent('close', { detail: event }));
     if (!this.closed && this.reconnect) this.scheduleReconnect();
@@ -165,20 +179,13 @@ export class RpcClient extends EventTarget {
     this.dispatchEvent(new CustomEvent('status', { detail: { status, error } }));
   }
 
-  rejectPending(error) {
-    for (const pending of this.pending.values()) {
-      clearTimeout(pending.timer);
-      pending.reject(error);
-    }
-    this.pending.clear();
-  }
-
   close() {
     this.closed = true;
     clearTimeout(this.stableTimer);
     clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
-    this.rejectPending(new Error('RPC client was closed.'));
+    this.peer.terminate();
+    this.events.clear();
     this.socket?.close(1000, 'Client closed');
     this.socket = null;
   }

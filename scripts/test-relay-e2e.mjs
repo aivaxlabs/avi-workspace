@@ -1,11 +1,13 @@
 // Real-socket relay end-to-end check: drives the actual RelaySocket/RpcClient against a local
-// v2 relay peer (the Desktop-side contract) over real WebSockets with the real ticket flow.
+// v3 Desktop-side contract peer (avi-remote v3 handshake + binary ORPC frames) over real
+// WebSockets with the real ticket flow.
 // Run: bun scripts/test-relay-e2e.mjs
 // Runs in its own process on purpose: DOM tests replace globalThis.WebSocket in `bun test`.
 import { strict as assert } from 'node:assert';
 import { RelaySocket } from '../src/rpc/relay-socket.js';
 import { RpcClient } from '../src/rpc/client.js';
 import { AIVAX_RELAYS_URL } from '../src/rpc/aivax.js';
+import { ORPC_PROTOCOL, parseFrame, responseFrames } from '../src/rpc/orpc.js';
 
 const TICKET_URL_PATH = '/v1/relays/11111111-1111-1111-1111-111111111111/device42/connect';
 const DEVICE_ID = 'device42';
@@ -29,25 +31,36 @@ function startRelayPeer() {
     },
     websocket: {
       message(ws, raw) {
-        const frame = JSON.parse(String(raw));
-        if (frame.type === 'avi-remote-open') {
-          state.opens.push(frame);
-          // Desktop v2 contract: the open frame carries no credential; anything else is rejected.
-          if (frame.version !== 2 || 'apiKey' in frame) {
-            ws.send(JSON.stringify({ type: 'avi-remote-error', version: 2, code: 'unauthorized' }));
+        if (typeof raw === 'string') {
+          const frame = JSON.parse(raw);
+          if (frame.type === 'avi-remote-open') {
+            state.opens.push(frame);
+            // Desktop v3 contract: the open frame names the ORPC protocol and carries no
+            // credential; anything else is rejected without a ready frame.
+            if (frame.version !== 3 || frame.protocol !== ORPC_PROTOCOL || 'apiKey' in frame) {
+              ws.send(JSON.stringify({ type: 'avi-remote-error', version: 3, code: 'unauthorized' }));
+              return;
+            }
+            ws.send(JSON.stringify({ type: 'avi-remote-ready', version: 3, protocol: ORPC_PROTOCOL }));
             return;
           }
-          ws.send(JSON.stringify({ type: 'avi-remote-ready', version: 2 }));
+          if (frame.type === 'avi-remote-ping') {
+            ws.send(JSON.stringify({ type: 'avi-remote-pong', version: 3, id: frame.id }));
+            return;
+          }
           return;
         }
-        if (frame.type === 'avi-remote-ping') {
-          ws.send(JSON.stringify({ type: 'avi-remote-pong', version: 2, id: frame.id }));
-          return;
-        }
-        if (frame.method) {
-          state.requests.push(frame.method);
-          ws.send(JSON.stringify({ jsonrpc: '2.0', id: frame.id, result: { methods: ['rpc:discover'], appVersion: '0.0.0-test', versions: { rpc: 1 } } }));
-        }
+        // Binary messages carry exactly one length-prefixed ORPC frame.
+        let parsed;
+        try { parsed = parseFrame(new Uint8Array(raw)); } catch { ws.close(1002, 'invalid orpc frame'); return; }
+        if (parsed.type !== 'REQ') return;
+        state.requests.push(parsed.method);
+        const request = JSON.parse(new TextDecoder().decode(parsed.content));
+        const result = parsed.method === 'rpc.discover'
+          ? { methods: ['rpc.discover'], appVersion: '0.0.0-test', versions: { rpc: 1 } }
+          : { ok: true, method: parsed.method };
+        const content = new TextEncoder().encode(JSON.stringify({ jsonrpc: '2.0', id: request.operationId, result }));
+        for (const frame of responseFrames(parsed.id, crypto.randomUUID(), content)) ws.send(Buffer.from(frame));
       },
     },
   });
@@ -77,13 +90,14 @@ async function testRelaySocketHandshake() {
       relay.addEventListener('close', () => reject(new Error('relay closed before opening')));
     });
     assert.equal(relay.readyState, 1);
+    assert.equal(relay.protocol, ORPC_PROTOCOL);
     assert.deepEqual(peer.state.tickets, [{ url: `${AIVAX_RELAYS_URL}/${DEVICE_ID}/tickets`, authorization: `Bearer ${ACCESS_TOKEN}`, body: { role: 'consumer' } }]);
-    assert.deepEqual(peer.state.opens, [{ type: 'avi-remote-open', version: 2, path: '/rpc' }]);
+    assert.deepEqual(peer.state.opens, [{ type: 'avi-remote-open', version: 3, protocol: ORPC_PROTOCOL, path: '/rpc' }]);
     await new Promise((resolve) => setTimeout(resolve, 40));
     assert.equal(closed, null, 'relay stayed open across a heartbeat tick');
     relay.close();
     assert.equal(closed.code, 1000);
-    console.log('(pass) RelaySocket completes the keyless v2 handshake over a real socket and heartbeats');
+    console.log('(pass) RelaySocket completes the keyless v3+protocol handshake over a real socket and heartbeats');
   } finally { peer.stop(); }
 }
 
@@ -95,11 +109,12 @@ async function testRpcClientOverRelay() {
       await client.connect();
       const discovery = await client.request('rpc:discover').catch(() => null);
       assert.notEqual(discovery, null);
-      assert.deepEqual(peer.state.opens, [{ type: 'avi-remote-open', version: 2, path: '/rpc' }]);
-      assert.ok(peer.state.requests.includes('rpc:discover'));
+      assert.deepEqual(peer.state.opens, [{ type: 'avi-remote-open', version: 3, protocol: ORPC_PROTOCOL, path: '/rpc' }]);
+      assert.ok(peer.state.requests.includes('rpc.discover'), 'discovery must travel as a dotted wire method in an ORPC frame');
+      assert.deepEqual(discovery, { methods: ['rpc.discover'], appVersion: '0.0.0-test', versions: { rpc: 1 } });
     } finally { await flush(); client.close(); }
     await flush();
-    console.log('(pass) RpcClient opens relay sessions and completes RPC over the real socket');
+    console.log('(pass) RpcClient opens relay sessions and completes binary ORPC RPC over the real socket');
   } finally { peer.stop(); }
 }
 

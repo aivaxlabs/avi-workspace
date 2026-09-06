@@ -18,7 +18,7 @@ describe('RPC URL and browser authentication', () => {
   test('encodes a UTF-8 key as a base64url subprotocol without padding', () => {
     expect(encodeApiKeyProtocol('clé/+/')).toMatch(/^avi-api-key\.[A-Za-z0-9_-]+$/);
     expect(encodeApiKeyProtocol('clé/+/')).not.toContain('=');
-    expect(createAuthProtocols('secret')[0]).toBe('avi-rpc-v1');
+    expect(createAuthProtocols('secret')[0]).toBe('avi-orpc-draft1');
   });
 
   test('requires the supported canonical discovery API version', () => {

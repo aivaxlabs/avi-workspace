@@ -8,7 +8,7 @@ describe('RPC contracts', () => {
   test('normalizes server and WebSocket URLs without embedding credentials', () => {
     expect(normalizeServerUrl('127.0.0.1:18992/')).toBe('http://127.0.0.1:18992');
     expect(toWebSocketUrl('https://avi.example/base', '/rpc')).toBe('wss://avi.example/base/rpc');
-    expect(createAuthProtocols('secret key')[0]).toBe('avi-rpc-v1');
+    expect(createAuthProtocols('secret key')[0]).toBe('avi-orpc-draft1');
     expect(createAuthProtocols('secret key')[1]).toStartWith('avi-api-key.');
     expect(toWebSocketUrl('http://localhost:18992')).not.toContain('secret');
   });

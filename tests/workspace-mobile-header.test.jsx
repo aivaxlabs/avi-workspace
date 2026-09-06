@@ -2,6 +2,7 @@ import { afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import { act } from 'preact/test-utils';
 import { h, render } from 'preact';
+import { FakeSocket as OrpcSocket } from './orpc-test-helpers.js';
 
 const window = new Window({ url: 'http://localhost/' });
 window.matchMedia = () => ({
@@ -21,32 +22,22 @@ Object.assign(globalThis, {
   cancelAnimationFrame: clearTimeout,
 });
 
-class FakeSocket extends EventTarget {
-  static OPEN = 1;
-  static instances = [];
-
+class FakeSocket extends OrpcSocket {
   constructor() {
-    super();
-    this.protocol = 'avi-rpc-v1';
-    this.readyState = 0;
+    super(undefined, undefined);
     this.requests = [];
     this.methods = ['conversations:context', 'composer-state:save', 'chat:send', 'conversations:tool-call-details'];
-    FakeSocket.instances.push(this);
     queueMicrotask(() => {
-      this.readyState = FakeSocket.OPEN;
-      this.dispatchEvent(new Event('open'));
       this.message({ jsonrpc: '2.0', method: 'conversation:ready', params: { sequence: 0, conversationId: 'thread-1' } });
     });
   }
 
-  send(value) {
-    const request = JSON.parse(value);
+  respond(socket, request) {
     this.requests.push(request);
-    if (request.method === 'conversations:tool-call-details') { queueMicrotask(() => this.message({ jsonrpc: '2.0', id: request.id, result: { argumentsText: '{"path":"demo.js"}', resultText: 'Actual tool output', hasResult: true } })); return; }
-    if (request.method === 'rpc:discover') { queueMicrotask(() => this.message({ jsonrpc: '2.0', id: request.id, result: { versions: { rpc: 1 }, scope: 'conversation', methods: this.methods } })); return; }
+    if (request.method === 'conversations:tool-call-details') { this.message({ id: request.id, result: { argumentsText: '{"path":"demo.js"}', resultText: 'Actual tool output', hasResult: true } }); return; }
+    if (request.method === 'rpc:discover') { this.message({ id: request.id, result: { versions: { rpc: 1 }, scope: 'conversation', methods: this.methods } }); return; }
     if (request.method === 'conversations:context') {
-      queueMicrotask(() => this.message({
-        jsonrpc: '2.0',
+      this.message({
         id: request.id,
         result: {
           conversation: { id: 'thread-1', title: 'Mobile thread', model: 'model:one', projectPath: 'C:\\Code\\avi', projectName: 'avi', projectDisplayPath: 'C:\\Code\\avi' },
@@ -64,21 +55,10 @@ class FakeSocket extends EventTarget {
           composer: { permissionMode: 'approve_for_me', model: 'model:one', reasoningEffort: null, workMode: null, ultraMode: false, draftText: '', attachments: [] },
           contextUsage: { tokens: 100, limit: 1000 },
         },
-      }));
+      });
     } else if (request.id) {
-      queueMicrotask(() => this.message({ jsonrpc: '2.0', id: request.id, result: true }));
+      this.message({ id: request.id, result: true });
     }
-  }
-
-  message(document) {
-    this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(document) }));
-  }
-
-  close(code = 1000, reason = '') {
-    this.readyState = 3;
-    const event = new Event('close');
-    Object.assign(event, { code, reason });
-    this.dispatchEvent(event);
   }
 }
 
@@ -109,17 +89,26 @@ describe('workspace mobile shell', () => {
       discovery: { versions: { rpc: 1 }, methods: ['conversations:list'] },
       conversations: [{ id: 'thread-1', title: 'Scoped thread' }], models: [], folders: [], onRefresh: async () => {}, onExit() {},
     }), root));
-    await act(async () => new Promise((resolve) => setTimeout(resolve, 30)));
+    await act(async () => {
+      const started = Date.now();
+      while (!root.querySelector('.thinking-summary') && Date.now() - started < 2000) await new Promise((resolve) => setTimeout(resolve, 10));
+    });
     act(() => root.querySelector('.thinking-summary').click());
     act(() => root.querySelector('.tool-line').click());
-    await act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
+    await act(async () => {
+      const started = Date.now();
+      while (!root.textContent.includes('Actual tool output') && Date.now() - started < 2000) await new Promise((resolve) => setTimeout(resolve, 10));
+    });
     expect(root.textContent).toContain('Actual tool output');
     expect(root.textContent).not.toContain('Tool details are not available');
     const socket = FakeSocket.instances.at(-1);
     expect(socket.requests.some((request) => request.method === 'conversations:tool-call-details')).toBe(true);
     socket.methods = ['conversations:context'];
     act(() => socket.message({ jsonrpc: '2.0', method: 'conversation:ready', params: { sequence: 0, conversationId: 'thread-1' } }));
-    await act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
+    await act(async () => {
+      const started = Date.now();
+      while (socket.requests.filter((request) => request.method === 'rpc:discover').length < 2 && Date.now() - started < 2000) await new Promise((resolve) => setTimeout(resolve, 10));
+    });
     expect(socket.requests.filter((request) => request.method === 'rpc:discover')).toHaveLength(2);
     expect(root.textContent).toContain('Tool details are not available');
   });

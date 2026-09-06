@@ -1,4 +1,4 @@
-export const RPC_PROTOCOL = 'avi-rpc-v1';
+export { ORPC_PROTOCOL as RPC_PROTOCOL } from './orpc.js';
 export const SUPPORTED_RPC_API_VERSIONS = Object.freeze([1]);
 export const HISTORY_PAGE_SIZE = 40;
 

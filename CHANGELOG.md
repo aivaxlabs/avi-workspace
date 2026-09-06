@@ -4,7 +4,11 @@
 
 ### Added
 
-- Relay sessions authenticate with the AIVAX session alone: the Avi Remote key prompt was removed, device selection connects directly, and the relay control envelope is version 2 with `{ type: 'avi-remote-open', version: 2, path }` carrying no credential; version 1 handshakes are rejected instead of marking the channel ready. The physical `avi-relay-v1` subprotocol and direct API-key connections are unchanged.
+- Clickable connection signal in the instance picker opens live connection details: last call round trip, ORPC transfer rates and byte counters, failed calls, reconnections and channel state. Browser-inaccessible TCP packet loss is explicitly marked unavailable.
+
+- RPC transport upgraded to ORPC Draft 1 (`avi-orpc-draft1`): binary length-prefixed frames carrying UTF-8 JSON operation envelopes (`operationId`, `expiresAt` now + 180 s, `params`), dotted wire methods over the colon application names, acknowledged server events answered with `OK`, no batching, and bounded recovery — at most one retry with a fresh wire request id and identical body (60 s attempt / 150 s overall). The Desktop operation journal deduplicates retries; a lost outcome answers `OUTCOME_UNKNOWN`, cancellation is delivery-only, and delivery is at-least-once, never exactly-once. Breaking: JSON-RPC 2.0 frames are no longer spoken. The bundled wire specification lives at `docs/orpc-spec.md`.
+
+- Relay sessions authenticate with the AIVAX session alone: the Avi Remote key prompt was removed, device selection connects directly, and the relay control envelope is version 3 with `{ type: 'avi-remote-open', version: 3, protocol: 'avi-orpc-draft1', path }` carrying no credential; version 1 and 2 handshakes are rejected instead of marking the channel ready. The physical `avi-relay-v1` subprotocol and direct API-key connections are unchanged.
 
 - Installable PWA manifest, regular/maskable/Apple icons, device theme colors and safe-area styling. A production-only, build-versioned service worker caches public shell assets for offline launch without persisting RPC data or forcing active sessions to reload.
 

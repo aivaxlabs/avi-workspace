@@ -2,6 +2,7 @@ import { afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import { act } from 'preact/test-utils';
 import { h, render } from 'preact';
+import { FakeSocket as OrpcSocket } from './orpc-test-helpers.js';
 
 const window = new Window({ url: 'http://localhost/' });
 Object.assign(globalThis, {
@@ -17,26 +18,18 @@ Object.assign(globalThis, {
 const queuedMessage = { id: 'queued-1', role: 'user', content: 'Queued request', status: 'queued' };
 const steeredMessage = { id: 'steer-1', role: 'user', content: 'Steered request', status: 'steered' };
 
-class FakeSocket extends EventTarget {
-  static OPEN = 1;
-
+class FakeSocket extends OrpcSocket {
   constructor() {
-    super();
-    this.protocol = 'avi-rpc-v1';
-    this.readyState = 0;
+    super(undefined, undefined);
     queueMicrotask(() => {
-      this.readyState = FakeSocket.OPEN;
-      this.dispatchEvent(new Event('open'));
       this.message({ jsonrpc: '2.0', method: 'conversation:ready', params: { sequence: 0, conversationId: 'thread-1' } });
     });
   }
 
-  send(value) {
-    const request = JSON.parse(value);
-    if (request.method === 'rpc:discover') { queueMicrotask(() => this.message({ jsonrpc: '2.0', id: request.id, result: { versions: { rpc: 1 }, scope: 'conversation', methods: ['conversations:context', 'composer-state:save', 'chat:send'] } })); return; }
+  respond(socket, request) {
+    if (request.method === 'rpc:discover') { this.message({ id: request.id, result: { versions: { rpc: 1 }, scope: 'conversation', methods: ['conversations:context', 'composer-state:save', 'chat:send'] } }); return; }
     if (request.method !== 'conversations:context') return;
-    queueMicrotask(() => this.message({
-      jsonrpc: '2.0',
+    this.message({
       id: request.id,
       result: {
         conversation: { id: 'thread-1', title: 'Pending test', model: 'model:one', projectPath: 'C:\\Code\\avi' },
@@ -59,16 +52,7 @@ class FakeSocket extends EventTarget {
         composer: { permissionMode: 'approve_for_me', model: 'model:one', reasoningEffort: null, workMode: null, ultraMode: false, draftText: '', attachments: [] },
         contextUsage: { tokens: 100, limit: 1000 },
       },
-    }));
-  }
-
-  message(document) {
-    this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(document) }));
-  }
-
-  close() {
-    this.readyState = 3;
-    this.dispatchEvent(new Event('close'));
+    });
   }
 }
 

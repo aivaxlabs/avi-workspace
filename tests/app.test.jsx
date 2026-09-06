@@ -3,6 +3,7 @@ import { Window } from 'happy-dom';
 import { IDBFactory } from 'fake-indexeddb';
 import { act } from 'preact/test-utils';
 import { h, render } from 'preact';
+import { FakeSocket as OrpcSocket, ORPC_PROTOCOL } from './orpc-test-helpers.js';
 let App;
 beforeAll(async () => { ({ App } = await import('../src/App.jsx')); });
 import { listConnections, saveConnection } from '../src/storage/connections.js';
@@ -23,59 +24,32 @@ const BASE_METHODS = ['rpc:discover', 'conversations:list', 'folders:list', 'con
 const CONVERSATIONS = [{ id: 'thread-1', title: 'Existing', model: 'model:one', projectPath: 'C:\\Code\\avi' }];
 const discoveryResult = () => ({ appVersion: '9.9.9', versions: { rpc: 1 }, methods: BASE_METHODS });
 
-class FakeSocket extends EventTarget {
-  static OPEN = 1;
-  static instances = [];
+class FakeSocket extends OrpcSocket {
   static responder = null;
 
   constructor(url, protocols) {
-    super();
-    this.url = url;
-    this.protocol = protocols?.[0] === 'avi-relay-v1' ? 'avi-relay-v1' : 'avi-rpc-v1';
-    this.bufferedAmount = 0;
+    super(url, protocols);
     this.handshake = null;
-    this.readyState = 0;
-    this.sent = [];
-    FakeSocket.instances.push(this);
-    queueMicrotask(() => {
-      if (this.readyState === 3) return;
-      this.readyState = FakeSocket.OPEN;
-      this.dispatchEvent(new Event('open'));
-    });
   }
 
-  send(value) {
-    const request = JSON.parse(value);
+  onControl(request) {
     if (request.type === 'avi-remote-open') {
       this.handshake = request;
       this.url = `ws://local${request.path}`;
       queueMicrotask(() => {
-        this.message({ type: 'avi-remote-ready', version: 2 });
+        this.message({ type: 'avi-remote-ready', version: 3, protocol: ORPC_PROTOCOL });
         if (request.path.includes('/streams/')) this.message({ method: 'conversation:ready', params: {} });
       });
-      return;
     }
-    this.sent.push(request.method);
-    queueMicrotask(async () => {
-      try {
-        const result = await (FakeSocket.responder ? FakeSocket.responder(this, request.method, request.params) : {});
-        this.message({ jsonrpc: '2.0', id: request.id, result });
-      } catch (error) {
-        this.message({ jsonrpc: '2.0', id: request.id, error: { code: -32000, message: error.message } });
-      }
-    });
   }
 
-  message(document) {
-    this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(document) }));
-  }
-
-  close(code = 1000, reason = '') {
-    if (this.readyState === 3) return;
-    this.readyState = 3;
-    const event = new Event('close');
-    Object.assign(event, { code, reason });
-    this.dispatchEvent(event);
+  async respond(socket, request) {
+    try {
+      const result = await (FakeSocket.responder ? FakeSocket.responder(this, request.method, request.json.params) : {});
+      this.message({ id: request.id, result });
+    } catch (error) {
+      this.message({ id: request.id, error: { code: -32000, message: error.message } });
+    }
   }
 }
 
@@ -115,7 +89,7 @@ function deferred() {
 }
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
-const modelsRequested = () => FakeSocket.instances.reduce((count, socket) => count + socket.sent.filter((method) => method === 'models:list').length, 0);
+const modelsRequested = () => FakeSocket.instances.reduce((count, socket) => count + socket.sent.filter((request) => request.method.replace('.', ':') === 'models:list').length, 0);
 const buttonByText = (text) => [...document.querySelectorAll('button')].find((button) => button.textContent.trim() === text);
 
 let root;
@@ -221,7 +195,7 @@ describe('App connections and workspace lifecycle', () => {
       for (let i = 0; i < 12; i++) await act(async () => { await flush(); });
       expect(document.querySelector('select[aria-label="Active Avi instance"]')).not.toBeNull();
       const global = FakeSocket.instances.find((socket) => socket.handshake?.path === '/rpc');
-      expect(global.handshake).toEqual({ type: 'avi-remote-open', version: 2, path: '/rpc' });
+      expect(global.handshake).toEqual({ type: 'avi-remote-open', version: 3, protocol: ORPC_PROTOCOL, path: '/rpc' });
       const thread = [...document.querySelectorAll('button')].find((button) => button.textContent.includes('Existing'));
       expect(thread).toBeDefined();
       await act(async () => { thread.click(); await flush(); });
@@ -229,7 +203,7 @@ describe('App connections and workspace lifecycle', () => {
       const stream = FakeSocket.instances.find((socket) => socket.handshake?.path === '/rpc/conversations/streams/thread-1');
       expect(stream).toBeDefined();
       expect(stream).not.toBe(global);
-      expect(stream.sent).toContain('conversations:context');
+      expect(stream.sent.map((request) => request.method.replace('.', ':'))).toContain('conversations:context');
       expect(tickets).toHaveLength(2);
       expect(tickets.every((entry) => entry.headers.Authorization === 'Bearer account-token')).toBe(true);
       expect(await listConnections()).toEqual([]);
@@ -243,7 +217,7 @@ describe('App connections and workspace lifecycle', () => {
     await renderApp();
     expect(document.querySelector('.connection-status.online')).not.toBeNull();
     expect(FakeSocket.instances).toHaveLength(1);
-    expect(FakeSocket.instances[0].sent).toEqual(['rpc:discover']);
+    expect(FakeSocket.instances[0].sent.map((request) => request.method.replace('.', ':'))).toEqual(['rpc:discover']);
     expect(FakeSocket.instances[0].readyState).toBe(3);
   });
 
@@ -271,7 +245,7 @@ describe('App connections and workspace lifecycle', () => {
     const openButton = buttonByText('Opening...');
     expect(openButton).not.toBeNull();
     expect(openButton.disabled).toBe(true);
-    await act(async () => { hold.resolve(discoveryResult()); await flush(); await flush(); });
+    await act(async () => { hold.resolve(discoveryResult()); for (let i = 0; i < 12; i += 1) await flush(); });
     expect(document.querySelector('select[aria-label="Active Avi instance"]')).not.toBeNull();
     expect(modelsRequested()).toBe(1);
   });
@@ -284,7 +258,7 @@ describe('App connections and workspace lifecycle', () => {
     expect(newChat).not.toBeNull();
     await act(async () => { newChat.click(); await flush(); await flush(); });
     expect(modelsRequested()).toBe(1);
-    expect(FakeSocket.instances.some((socket) => socket.sent.includes('conversations:create'))).toBe(true);
+    expect(FakeSocket.instances.some((socket) => socket.sent.some((request) => request.method.replace('.', ':') === 'conversations:create'))).toBe(true);
   });
 
   test('exiting during an in-flight refresh leaves the workspace closed', async () => {
@@ -327,7 +301,7 @@ describe('App connections and workspace lifecycle', () => {
       await flush(); await flush();
     });
     hold.resolve(discoveryResult());
-    await act(async () => { await flush(); await flush(); });
+    await act(async () => { for (let i = 0; i < 12; i += 1) await flush(); });
     const select = document.querySelector('select[aria-label="Active Avi instance"]');
     expect(select).not.toBeNull();
     expect(select.value).toBe(beta.id);

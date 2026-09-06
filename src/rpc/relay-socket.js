@@ -57,7 +57,7 @@ export class RelaySocket extends EventTarget {
         socket.addEventListener('open', () => {
           if (this.readyState === 3) return;
           if (socket.protocol !== 'avi-relay-v1') { this.finish(1008, 'Unsupported relay protocol.', false); return; }
-          try { socket.send(JSON.stringify({ type: 'avi-remote-open', version: 2, path })); }
+          try { socket.send(JSON.stringify({ type: 'avi-remote-open', version: 3, protocol: RPC_PROTOCOL, path })); }
           catch { this.finish(1006, 'Remote handshake failed.', true); }
         });
         socket.addEventListener('message', (event) => {
@@ -65,12 +65,12 @@ export class RelaySocket extends EventTarget {
           let frame;
           try { frame = typeof event.data === 'string' ? JSON.parse(event.data) : null; } catch { frame = null; }
           if (frame?.type === 'avi-remote-error') {
-            const retryable = frame.version === 2 && frame.code === 'unavailable';
+            const retryable = frame.version === 3 && frame.code === 'unavailable';
             this.finish(retryable ? 1013 : 4003, frame.code === 'unauthorized' ? 'The remote Avi rejected this AIVAX account.' : 'Avi Remote handshake failed.', retryable);
             return;
           }
           if (this.readyState === 0) {
-            if (frame?.type !== 'avi-remote-ready' || frame.version !== 2) { this.finish(1008, 'Invalid Remote handshake response.', false); return; }
+            if (frame?.type !== 'avi-remote-ready' || frame.version !== 3 || frame.protocol !== RPC_PROTOCOL) { this.finish(1008, 'Invalid Remote handshake response.', false); return; }
             clearTimeout(this.timer);
             this.protocol = RPC_PROTOCOL;
             this.readyState = 1;
@@ -83,14 +83,14 @@ export class RelaySocket extends EventTarget {
               } else this.stalledSince = null;
               if (!this.pingId) {
                 this.pingId = crypto.randomUUID();
-                try { this.send(JSON.stringify({ type: 'avi-remote-ping', version: 2, id: this.pingId })); } catch {}
+                try { this.send(JSON.stringify({ type: 'avi-remote-ping', version: 3, id: this.pingId })); } catch {}
               }
             }, heartbeatMs);
             this.dispatchEvent(new Event('open'));
             return;
           }
           if (frame?.type === 'avi-remote-pong') {
-            if (frame.version !== 2 || !this.pingId || frame.id !== this.pingId) { this.finish(1008, 'Invalid relay heartbeat.', false); return; }
+            if (frame.version !== 3 || !this.pingId || frame.id !== this.pingId) { this.finish(1008, 'Invalid relay heartbeat.', false); return; }
             this.lastPong = Date.now();
             this.pingId = null;
             return;
@@ -107,6 +107,10 @@ export class RelaySocket extends EventTarget {
         if (this.readyState !== 3) this.finish(error instanceof SyntaxError || error instanceof URIError ? 1008 : 1006, 'Could not establish the relay connection.', !(error instanceof SyntaxError || error instanceof URIError));
       }
     });
+  }
+
+  get bufferedAmount() {
+    return this.socket?.bufferedAmount ?? 0;
   }
 
   send(data) {
