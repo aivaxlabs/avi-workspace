@@ -198,6 +198,269 @@ h1, h2, h3, h4, h5, h6, strong, b, th {
         transition: none !important;
     }
 }
+/* components\visualizations.xcss */
+.markdown .visual-heading {
+    display: flex;
+    align-items: baseline;
+    gap: .6rem;
+    font-size: var(--font-md);
+    overflow-wrap: anywhere;
+}
+
+.markdown .visual-heading.callout-success {
+    color: var(--success-color);
+}
+
+.markdown .visual-heading.callout-warning {
+    color: var(--warn-color);
+}
+
+.markdown .visual-heading.callout-danger, .markdown .visual-heading.finding-P0, .markdown .visual-heading.finding-P1 {
+    color: var(--danger-color);
+}
+
+.markdown .visual-heading > strong {
+    font: bold .8rem var(--font-code);
+}
+
+.markdown .visual-file-ref {
+    display: inline;
+    overflow-wrap: anywhere;
+    color: var(--text-secondary);
+}
+
+.markdown .visual-file-ref > i {
+    margin-right: .35rem;
+}
+
+.markdown .visual-file-ref > code {
+    white-space: normal;
+}
+
+.markdown .visual-panel {
+    min-width: 0;
+    margin: 1rem 0;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.markdown .visual-panel > header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .75rem;
+    padding: .65rem .8rem;
+    background: var(--background-secondary);
+}
+
+.markdown .visual-panel > header > span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.markdown .visual-panel > header > button {
+    flex: none;
+    min-height: 36px;
+    padding: .3rem .65rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--background-tertiary);
+    cursor: pointer;
+}
+
+.markdown .visual-panel > header > button:hover {
+    background: var(--item-active);
+}
+
+.markdown .visual-panel > pre {
+    margin: 0;
+    padding: .8rem;
+    overflow-x: auto;
+}
+
+.markdown .visual-panel > small {
+    display: block;
+    padding: .5rem .8rem;
+    overflow-wrap: anywhere;
+}
+
+.markdown .visual-panel > .visual-file-content {
+    padding: .8rem;
+    min-width: 0;
+}
+
+.markdown .visual-panel .visual-diff > code > span {
+    display: block;
+    min-width: max-content;
+}
+
+.markdown .visual-panel .visual-diff > code > span.added {
+    color: var(--success-color);
+}
+
+.markdown .visual-panel .visual-diff > code > span.removed {
+    color: var(--danger-color);
+}
+
+.markdown .visual-async {
+    min-width: 0;
+    max-width: 100%;
+    margin: 1rem 0;
+    overflow-x: auto;
+}
+
+.markdown .visual-async > img {
+    display: block;
+    width: 100%;
+    height: auto;
+    background: #fff;
+    border-radius: 6px;
+}
+
+.markdown .visual-async > pre {
+    overflow-x: auto;
+}
+
+.markdown .visual-async .katex-display {
+    margin: .5rem 0;
+}
+
+.markdown .visual-chart {
+    --series-0: var(--primary-color);
+    --series-1: var(--success-color);
+    --series-2: var(--danger-color);
+    --series-3: var(--text-secondary);
+    --series-4: var(--warn-color);
+    --series-5: var(--text-muted);
+    min-width: 0;
+    margin: 1rem 0;
+    padding: 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+}
+
+.markdown .visual-chart > figcaption {
+    font-weight: 600;
+    margin-bottom: .8rem;
+    overflow-wrap: anywhere;
+}
+
+.markdown .visual-chart > svg {
+    display: block;
+    width: 100%;
+    max-height: 240px;
+    overflow: visible;
+}
+
+.markdown .visual-chart > svg > polyline {
+    fill: none;
+    stroke: var(--primary-color);
+    stroke-width: 3;
+}
+
+.markdown .visual-chart > svg > circle {
+    fill: var(--primary-color);
+}
+
+.markdown .visual-chart > svg.visual-pie {
+    width: 160px;
+    height: 160px;
+    margin: 1rem auto;
+}
+
+.markdown .visual-chart > svg.visual-pie > circle {
+    fill: none;
+    stroke: var(--border-color);
+    stroke-width: 16;
+}
+
+.markdown .visual-chart > ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: .65rem;
+}
+
+.markdown .visual-chart > ul > li {
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    min-width: 0;
+}
+
+.markdown .visual-chart > ul > li > span {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.markdown .visual-chart > ul > li > span > i {
+    display: inline-block;
+    width: .65rem;
+    height: .65rem;
+    margin-right: .5rem;
+    border-radius: 50%;
+}
+
+.markdown .visual-chart > ul > li > progress {
+    flex: 1;
+    min-width: 30px;
+    height: .65rem;
+    accent-color: var(--primary-color);
+}
+
+.markdown .visual-chart > ul > li > strong {
+    font-size: var(--font-xs);
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+    max-width: 45%;
+}
+
+.markdown .visual-chart .series-0 {
+    stroke: var(--series-0) !important;
+    background: var(--series-0);
+}
+
+.markdown .visual-chart .series-1 {
+    stroke: var(--series-1) !important;
+    background: var(--series-1);
+}
+
+.markdown .visual-chart .series-2 {
+    stroke: var(--series-2) !important;
+    background: var(--series-2);
+}
+
+.markdown .visual-chart .series-3 {
+    stroke: var(--series-3) !important;
+    background: var(--series-3);
+}
+
+.markdown .visual-chart .series-4 {
+    stroke: var(--series-4) !important;
+    background: var(--series-4);
+}
+
+.markdown .visual-chart .series-5 {
+    stroke: var(--series-5) !important;
+    background: var(--series-5);
+}
+
+@media (max-width: 520px) {
+    .markdown .visual-chart {
+        padding: .75rem;
+    }
+
+    .markdown .visual-chart > ul > li {
+        flex-wrap: wrap;
+    }
+
+    .markdown .visual-chart > ul > li > span {
+        flex-basis: 100%;
+    }
+}
 /* components\chat.xcss */
 .message {
     min-width: 0;

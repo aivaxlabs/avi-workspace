@@ -74,6 +74,7 @@ export function Composer({ client, state, models, discovery, draftCache, intelli
   const [ultraMode, setUltraMode] = useState(false);
   const [attachments, setAttachments] = useState([]);
   const [options, setOptions] = useState([]);
+  const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
   const [activeOption, setActiveOption] = useState(0);
   const [openMenu, setOpenMenu] = useState(null);
   const [modelSubmenu, setModelSubmenu] = useState(null);
@@ -96,6 +97,7 @@ export function Composer({ client, state, models, discovery, draftCache, intelli
   const timer = useRef();
   const submitMode = useRef(null);
   const root = useRef();
+  const fileInput = useRef();
   const modelHolderRef = useRef(null);
   const effortHolderRef = useRef(null);
   const modelSubmenuRef = useRef(null);
@@ -220,12 +222,18 @@ export function Composer({ client, state, models, discovery, draftCache, intelli
 
   useEffect(() => {
     const close = (event) => {
-      if (root.current?.contains(event.target)) return;
-      setOpenMenu(null);
-      setModelSubmenu(null);
+      const holder = root.current?.querySelector('[aria-haspopup][aria-expanded="true"]:not(textarea)')?.closest('.composer-menu-holder');
+      if (!holder?.contains(event.target)) {
+        setOpenMenu(null);
+        setModelSubmenu(null);
+      }
+      if (!root.current?.querySelector('textarea')?.contains(event.target) && !root.current?.querySelector('.command-picker')?.contains(event.target)) {
+        setSuggestionsDismissed(true);
+        setOptions([]);
+      }
     };
-    window.addEventListener('pointerdown', close);
-    return () => window.removeEventListener('pointerdown', close);
+    document.addEventListener('pointerdown', close, true);
+    return () => document.removeEventListener('pointerdown', close, true);
   }, []);
 
   useEffect(() => {
@@ -263,19 +271,22 @@ export function Composer({ client, state, models, discovery, draftCache, intelli
 
   useEffect(() => {
     clearTimeout(timer.current);
-    if (!invocation) { setOptions([]); return; }
+    setOptions([]);
+    if (!invocation || suggestionsDismissed) return;
+    let cancelled = false;
     timer.current = setTimeout(async () => {
       try {
         const query = invocation[2];
         const remote = invocation[1] === '@'
           ? (supportsMethod(discovery, METHODS.mentions) ? ((await client.request(METHODS.mentions, { query })).paths ?? []).map((item) => ({ ...item, label: item.label ?? item.path, value: item.path })) : [])
           : supportsMethod(discovery, METHODS.commands) ? (await client.request(METHODS.commands)).filter((item) => item.type === (invocation[1] === '$' ? 'skill' : 'workflow') && (!query || item.name.toLowerCase().includes(query.toLowerCase()))).map((item) => ({ ...item, label: `${invocation[1]}${item.name}`, value: `${invocation[1]}${item.name}` })) : [];
+        if (cancelled) return;
         setOptions(invocation[1] === '/' ? [...BUILT_INS.filter((item) => supportsMethod(discovery, item.name === 'stop' ? METHODS.stop : METHODS.createSideChat)).map((item) => ({ ...item, label: `/${item.name}`, value: `/${item.name}` })), ...remote] : remote);
         setActiveOption(0);
-      } catch { setOptions([]); }
+      } catch { if (!cancelled) setOptions([]); }
     }, 120);
-    return () => clearTimeout(timer.current);
-  }, [discovery, invocation?.[0], invocation?.[2], client]);
+    return () => { cancelled = true; clearTimeout(timer.current); };
+  }, [discovery, invocation?.[0], invocation?.[2], client, suggestionsDismissed]);
 
   useEffect(() => {
     if (!options.length) return;
@@ -299,6 +310,36 @@ export function Composer({ client, state, models, discovery, draftCache, intelli
     }]);
     setText(text.slice(0, text.length - invocation[0].trimStart().length));
     setOptions([]);
+  }
+
+  async function addFiles(files) {
+    if (!files.length || busy || pasteInFlight.current) return;
+    if (!supportsMethod(discovery, METHODS.send)) return onError(new Error('Attachments cannot be sent on this Avi instance.'));
+    pasteInFlight.current = true;
+    setPasting(true);
+    try {
+      const existing = latestDraftRef.current?.attachments ?? attachments;
+      const total = [...existing, ...files].reduce((sum, item) => sum + (Number(item.size) || 0), 0);
+      if (total > INLINE_FILES_LIMIT) throw new Error('Attachments are limited to 512 KiB combined. Larger files require chunked upload support from Avi.');
+      const added = await Promise.all(files.map(async (file) => {
+        const dataUrl = await new Promise((resolve, reject) => {
+          const reader = new window.FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(new Error(`Could not read ${file.name || 'attachment'}.`));
+          reader.readAsDataURL(file);
+        });
+        return { id: crypto.randomUUID(), name: file.name || 'Attachment', mime: file.type || 'application/octet-stream', size: file.size, kind: file.type.startsWith('image/') ? 'image_url' : 'file', source: 'clipboard', dataUrl };
+      }));
+      if (!aliveRef.current) return;
+      const nextAttachments = [...existing, ...added];
+      const draft = { ...latestDraftRef.current, attachments: nextAttachments };
+      checkComposerPayload(draft);
+      latestDraftRef.current = draft;
+      dirtyRef.current = true;
+      draftCache.set(conversation.id, { draft, dirty: true });
+      setAttachments(nextAttachments);
+    } catch (error) { if (aliveRef.current) onError(error); }
+    finally { pasteInFlight.current = false; if (aliveRef.current) setPasting(false); }
   }
 
   async function mutateQueue(method, payload, feedback = 'Queue updated') {
@@ -353,7 +394,7 @@ export function Composer({ client, state, models, discovery, draftCache, intelli
     root.current?.querySelector('textarea')?.blur();
   }, [compact]);
 
-  const visibleOptions = options.slice(0, 12);
+  const visibleOptions = invocation && !suggestionsDismissed ? options.slice(0, 12) : [];
   const queueSections = [
     { id: 'steer', label: 'Steer', description: 'Applied after the current assistant turn', icon: 'ri-corner-down-left-line', items: state.queue.steer },
     { id: 'queue', label: 'Queue', description: 'Sent after the assistant finishes', icon: 'ri-time-line', items: state.queue.queued },
@@ -416,35 +457,10 @@ export function Composer({ client, state, models, discovery, draftCache, intelli
         const files = Array.from(event.clipboardData?.files ?? []);
         if (!files.length) return;
         event.preventDefault();
-        if (busy || pasteInFlight.current) return;
-        if (!supportsMethod(discovery, METHODS.send)) return onError(new Error('Attachments cannot be sent on this Avi instance.'));
-        pasteInFlight.current = true;
-        setPasting(true);
-        try {
-          const existing = latestDraftRef.current?.attachments ?? attachments;
-          const total = [...existing, ...files].reduce((sum, item) => sum + (Number(item.size) || 0), 0);
-          if (total > INLINE_FILES_LIMIT) throw new Error('Pasted attachments are limited to 512 KiB combined. Larger files require chunked upload support from Avi.');
-          const added = await Promise.all(files.map(async (file) => {
-            const dataUrl = await new Promise((resolve, reject) => {
-              const reader = new window.FileReader();
-              reader.onload = () => resolve(reader.result);
-              reader.onerror = () => reject(new Error(`Could not read ${file.name || 'clipboard attachment'}.`));
-              reader.readAsDataURL(file);
-            });
-            return { id: crypto.randomUUID(), name: file.name || 'Clipboard attachment', mime: file.type || 'application/octet-stream', size: file.size, kind: file.type.startsWith('image/') ? 'image_url' : 'file', source: 'clipboard', dataUrl };
-          }));
-          if (!aliveRef.current) return;
-          const nextAttachments = [...existing, ...added];
-          const draft = { ...latestDraftRef.current, attachments: nextAttachments };
-          checkComposerPayload(draft);
-          latestDraftRef.current = draft;
-          dirtyRef.current = true;
-          draftCache.set(conversation.id, { draft, dirty: true });
-          setAttachments(nextAttachments);
-        } catch (error) { if (aliveRef.current) onError(error); }
-        finally { pasteInFlight.current = false; if (aliveRef.current) setPasting(false); }
+        await addFiles(files);
       }} onInput={(event) => {
         const value = event.currentTarget.value;
+        setSuggestionsDismissed(false);
         const draft = { ...latestDraftRef.current, draftText: value };
         latestDraftRef.current = draft;
         dirtyRef.current = true;
@@ -454,16 +470,21 @@ export function Composer({ client, state, models, discovery, draftCache, intelli
         if (event.isComposing) return;
         if (visibleOptions.length && ['ArrowDown', 'ArrowUp'].includes(event.key)) { event.preventDefault(); setActiveOption((current) => (current + (event.key === 'ArrowDown' ? 1 : -1) + visibleOptions.length) % visibleOptions.length); }
         else if (visibleOptions.length && ['Enter', 'Tab'].includes(event.key)) { event.preventDefault(); choose(visibleOptions[activeOption]); }
-        else if (visibleOptions.length && event.key === 'Escape') { event.preventDefault(); setOptions([]); setActiveOption(0); }
+        else if (invocation && event.key === 'Escape') { event.preventDefault(); setSuggestionsDismissed(true); setOptions([]); setActiveOption(0); }
         else if (event.key === 'Enter' && !event.shiftKey) {
           event.preventDefault();
           submitMode.current = event.ctrlKey ? (messageDeliveryMode === 'steer' ? 'queue' : 'steer') : messageDeliveryMode;
           event.currentTarget.form.requestSubmit();
         }
       }} />
+      <input ref={fileInput} type="file" multiple hidden aria-label="Attach files" disabled={busy || pasting || !supportsMethod(discovery, METHODS.send)} onChange={async (event) => {
+        const files = Array.from(event.currentTarget.files ?? []);
+        event.currentTarget.value = '';
+        await addFiles(files);
+      }} />
       <footer>
         <div class="composer-controls">
-          <div class="composer-menu-holder"><button type="button" class="round-control" aria-label="Composer actions" aria-haspopup="menu" aria-expanded={openMenu === 'plus'} onClick={() => setOpenMenu(openMenu === 'plus' ? null : 'plus')}><i class="ri-add-line" /></button>{openMenu === 'plus' && <div class="composer-menu plus-menu" role="menu"><button type="button" role="menuitemcheckbox" aria-checked={ultraMode} onClick={() => { setUltraMode(!ultraMode); setWorkMode(null); setOpenMenu(null); }}><i class="ri-flashlight-line" />Ultra</button><button type="button" role="menuitemcheckbox" aria-checked={workMode === 'goal'} onClick={() => { setWorkMode(workMode === 'goal' ? null : 'goal'); setUltraMode(false); setOpenMenu(null); }}><i class="ri-focus-3-line" />Goal</button><button type="button" role="menuitemcheckbox" aria-checked={workMode === 'plan'} onClick={() => { setWorkMode(workMode === 'plan' ? null : 'plan'); setUltraMode(false); setOpenMenu(null); }}><i class="ri-list-check-3" />Plan</button><button type="button" role="menuitem" disabled={!supportsMethod(discovery, METHODS.createSideChat)} onClick={() => { setOpenMenu(null); Promise.resolve().then(onSideChat).catch(onError); }}><i class="ri-chat-new-line" />Side chat</button><span class="mobile-permission-label">Permission</span><div class="mobile-permission-options">{PERMISSIONS.map((item) => <button key={item.id} type="button" role="menuitemradio" aria-checked={item.id === permissionMode} onClick={() => { setPermissionMode(item.id); setOpenMenu(null); }}><i class={item.icon} /><span><strong>{item.label}</strong><small>{item.description}</small></span></button>)}</div></div>}</div>
+          <div class="composer-menu-holder"><button type="button" class="round-control" aria-label="Composer actions" aria-haspopup="menu" aria-expanded={openMenu === 'plus'} onClick={() => setOpenMenu(openMenu === 'plus' ? null : 'plus')}><i class="ri-add-line" /></button>{openMenu === 'plus' && <div class="composer-menu plus-menu" role="menu"><button type="button" role="menuitem" disabled={busy || pasting || !supportsMethod(discovery, METHODS.send)} title="Attach files (512 KiB combined limit)" onClick={() => { fileInput.current?.click(); setOpenMenu(null); }}><i class="ri-attachment-2" />Attach files</button><button type="button" role="menuitemcheckbox" aria-checked={ultraMode} onClick={() => { setUltraMode(!ultraMode); setWorkMode(null); setOpenMenu(null); }}><i class="ri-flashlight-line" />Ultra</button><button type="button" role="menuitemcheckbox" aria-checked={workMode === 'goal'} onClick={() => { setWorkMode(workMode === 'goal' ? null : 'goal'); setUltraMode(false); setOpenMenu(null); }}><i class="ri-focus-3-line" />Goal</button><button type="button" role="menuitemcheckbox" aria-checked={workMode === 'plan'} onClick={() => { setWorkMode(workMode === 'plan' ? null : 'plan'); setUltraMode(false); setOpenMenu(null); }}><i class="ri-list-check-3" />Plan</button><button type="button" role="menuitem" disabled={!supportsMethod(discovery, METHODS.createSideChat)} onClick={() => { setOpenMenu(null); Promise.resolve().then(onSideChat).catch(onError); }}><i class="ri-chat-new-line" />Side chat</button><span class="mobile-permission-label">Permission</span><div class="mobile-permission-options">{PERMISSIONS.map((item) => <button key={item.id} type="button" role="menuitemradio" aria-checked={item.id === permissionMode} onClick={() => { setPermissionMode(item.id); setOpenMenu(null); }}><i class={item.icon} /><span><strong>{item.label}</strong><small>{item.description}</small></span></button>)}</div></div>}</div>
           <div class="composer-menu-holder permission-control"><button type="button" class="control-chip" aria-haspopup="menu" aria-expanded={openMenu === 'permission'} onClick={() => setOpenMenu(openMenu === 'permission' ? null : 'permission')}><i class={permission.icon} /><span>{permission.label}</span><i class="ri-arrow-down-s-line" /></button>{openMenu === 'permission' && <div class="composer-menu permission-menu" role="menu">{PERMISSIONS.map((item) => <button key={item.id} type="button" role="menuitemradio" aria-checked={item.id === permissionMode} onClick={() => { setPermissionMode(item.id); setOpenMenu(null); }}><i class={item.icon} /><span><strong>{item.label}</strong><small>{item.description}</small></span></button>)}</div>}</div>
           {workMode && <button type="button" class="mode-chip" onClick={() => setWorkMode(null)}><i class={workMode === 'goal' ? 'ri-focus-3-line' : 'ri-list-check-3'} />{workMode === 'goal' ? 'Goal' : 'Plan'}<i class="ri-close-line" /></button>}
           {ultraMode && <button type="button" class="mode-chip" onClick={() => setUltraMode(false)}><i class="ri-flashlight-line" />Ultra<i class="ri-close-line" /></button>}

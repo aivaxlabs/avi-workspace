@@ -55,6 +55,12 @@ Draft autosave is not offline storage: a page reload or crash before a successfu
 
 Global instance status and the periodic projection refresh run serialized, so a refresh never overlaps recovery or status handling. Tool-call detail panels load on demand through `conversations:tool-call-details`, and every remote capability across sidebar, composer, attachments, and auxiliary panels is enabled only when `rpc:discover` advertises the method.
 
+## Chat visualizations
+
+Chat Markdown supports Avi callouts, findings, bar/line/pie/progress charts, copyable text, diffs, file references and excerpts, Mermaid diagrams, and LaTeX equations. Invalid or incomplete directives remain literal text while streaming; fenced examples remain code. Raw HTML is not rendered, and Markdown links and attributes are sanitized. File references display host-relative paths only; they do not read or open host files.
+
+Mermaid and KaTeX load on demand from bundled assets. Mermaid uses strict mode and sanitized SVG images; links, HTML, external resources, and diagram configuration directives are rejected. Equations use KaTeX with trust disabled and native MathML output, preserving the production policy against inline styles. Failed visualizations retain their source. The PWA shell cache also includes these bundled assets for offline rendering; they increase its installation download size.
+
 ## Installable PWA
 
 Serve the production `dist/` directory over HTTPS (localhost also works). Chromium exposes installation in its browser menu; on iOS/iPadOS use Safari → Share → Add to Home Screen. The target is current Chromium and Safari/iOS 16.4+, with platform installation behavior requiring physical-device verification. Relative manifest URLs support subdirectory hosting; serve `sw.js` as JavaScript without redirects and preferably with `Cache-Control: no-cache`.

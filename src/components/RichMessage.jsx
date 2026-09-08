@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { renderMarkdown } from '../lib/markdown.js';
+import { ChatMarkdown } from './ChatMarkdown.jsx';
 import { useModalFocus } from '../lib/use-modal-focus.js';
 import { buildMessageTimeline, formatWorkedDuration, operationGroupHasTools, operationGroupLabel, parseStructuredAgentMessage, partitionMessageTimeline } from '../lib/message-timeline.js';
 import { attachmentReadParams, METHODS, normalizeAttachmentChunk, supportsMethod } from '../rpc/contracts.js';
@@ -166,7 +166,7 @@ function DiffBlock({ segment }) {
 }
 
 function MarkdownBlock({ text, muted = false }) {
-  return <div class={muted ? 'markdown reasoning-text' : 'markdown'} dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} />;
+  return <ChatMarkdown text={text} muted={muted} />;
 }
 
 function ToolEntry({ segment, client, discovery }) {
@@ -252,7 +252,7 @@ function OperationsGroup({ items, client, discovery, streaming = false, trailing
 
 function TimelineItems({ items, client, discovery, streaming = false }) {
   return <>{items.map((item, index) => item.type === 'content'
-    ? <MarkdownBlock key={item.id ?? `content:${item.text}`} text={item.text} />
+    ? <MarkdownBlock key={item.id ?? `content:${index}`} text={item.text} />
     : item.type === 'operations'
       ? <OperationsGroup key={item.id ?? `operations:${item.items.map((entry) => entry.id ?? entry.callId ?? entry.type).join(':')}`} items={item.items} client={client} discovery={discovery} streaming={streaming} trailing={index === items.length - 1} />
       : item.type === 'diff'

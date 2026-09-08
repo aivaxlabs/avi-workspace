@@ -27,6 +27,18 @@ afterEach(() => {
 });
 
 describe('RichMessage', () => {
+  test('preserves visualization instances when streaming appends text', () => {
+    const root = document.createElement('div'); document.body.append(root);
+    const content = '::avi-copy{label="Command" value="bun test"}\n\n';
+    try {
+      act(() => render(h(RichMessage, { message: { id: 'stream', role: 'assistant', status: 'streaming', content }, client: {}, discovery: FULL_DISCOVERY() }), root));
+      const panel = root.querySelector('.visual-panel');
+      expect(panel).not.toBeNull();
+      act(() => render(h(RichMessage, { message: { id: 'stream', role: 'assistant', status: 'streaming', content: content + 'More text' }, client: {}, discovery: FULL_DISCOVERY() }), root));
+      expect(root.querySelector('.visual-panel')).toBe(panel);
+      expect(root.textContent).toContain('More text');
+    } finally { act(() => render(null, root)); }
+  });
   test('copies answer text without reasoning and forks through the selected message', async () => {
     const root = document.createElement('div'); document.body.append(root);
     const copied = [];

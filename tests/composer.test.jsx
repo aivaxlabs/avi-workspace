@@ -373,6 +373,49 @@ describe('composer parity', () => {
     expect(view.draftCache.get('thread-1').dirty).toBe(false);
   });
 
+  test('attaches selected files from the Plus menu and allows selecting again after removal', async () => {
+    const view = mount(createState({ composer: { ...createState().composer, attachments: [] } }));
+    try {
+      const input = view.root.querySelector('input[type="file"]');
+      let opened = 0;
+      input.click = () => { opened += 1; };
+      act(() => view.root.querySelector('[aria-label="Composer actions"]').click());
+      act(() => buttonWithText(view.root.querySelector('.plus-menu'), 'Attach files').click());
+      expect(opened).toBe(1);
+      expect(view.root.querySelector('.plus-menu')).toBeNull();
+      expect(input.multiple).toBe(true);
+      Object.defineProperty(input, 'files', { configurable: true, value: [new window.File(['image'], 'shot.png', { type: 'image/png' }), new window.File(['notes'], 'notes.txt', { type: 'text/plain' })] });
+      await act(async () => { input.dispatchEvent(new window.Event('change', { bubbles: true })); await new Promise((resolve) => setTimeout(resolve, 30)); });
+      expect(input.value).toBe('');
+      expect(view.root.querySelector('.composer-markers img')).not.toBeNull();
+      expect(view.draftCache.get('thread-1').draft.attachments).toHaveLength(2);
+      act(() => view.root.querySelector('[aria-label="Remove notes.txt"]').click());
+      Object.defineProperty(input, 'files', { configurable: true, value: [new window.File(['notes'], 'notes.txt', { type: 'text/plain' })] });
+      await act(async () => { input.dispatchEvent(new window.Event('change', { bubbles: true })); await new Promise((resolve) => setTimeout(resolve, 30)); });
+      act(() => view.root.querySelector('form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })));
+      await flush();
+      expect(view.calls.find((call) => call.method === METHODS.send).params.attachments.map((item) => item.name)).toEqual(['shot.png', 'notes.txt']);
+    } finally { view.unmount(); }
+  });
+
+  test('file selection cancellation and oversized files leave attachments unchanged', async () => {
+    const view = mount(createState({ composer: { ...createState().composer, attachments: [] } }));
+    try {
+      const input = view.root.querySelector('input[type="file"]');
+      await act(async () => input.dispatchEvent(new window.Event('change', { bubbles: true })));
+      expect(view.errors).toHaveLength(0);
+      Object.defineProperty(input, 'files', { value: [new window.File([new Uint8Array(512 * 1024 + 1)], 'large.bin')] });
+      await act(async () => input.dispatchEvent(new window.Event('change', { bubbles: true })));
+      expect(view.errors[0].message).toContain('512 KiB');
+      expect(view.root.querySelector('.composer-markers')).toBeNull();
+    } finally { view.unmount(); }
+    const unsupported = mount(createState(), { discovery: discoveryWithout('send') });
+    try {
+      act(() => unsupported.root.querySelector('[aria-label="Composer actions"]').click());
+      expect(buttonWithText(unsupported.root.querySelector('.plus-menu'), 'Attach files').disabled).toBe(true);
+    } finally { unsupported.unmount(); }
+  });
+
   test('pastes images and files, previews images and sends inline attachments', async () => {
     const view = mount(createState({ composer: { ...createState().composer, attachments: [] } }));
     const event = new window.Event('paste', { bubbles: true, cancelable: true });
@@ -524,6 +567,50 @@ describe('composer parity', () => {
     expect(sheet.querySelector('[role="alert"]').textContent).toBe('Queue unavailable');
     expect(sheet.textContent).toContain('First queued');
     view.unmount();
+  });
+
+  test('dismisses composer menus outside their holder for touch and mouse', async () => {
+    const view = mount();
+    try {
+      for (const pointerType of ['touch', 'mouse']) {
+        for (const selector of ['[aria-label="Composer actions"]', '.permission-control > button', '.model-chip']) {
+          act(() => view.root.querySelector(selector).click());
+          const menu = view.root.querySelector('.composer-menu');
+          expect(menu).not.toBeNull();
+          act(() => menu.dispatchEvent(new window.PointerEvent('pointerdown', { bubbles: true, pointerType })));
+          expect(view.root.querySelector('.composer-menu')).not.toBeNull();
+          act(() => view.root.querySelector('textarea').dispatchEvent(new window.PointerEvent('pointerdown', { bubbles: true, pointerType })));
+          expect(view.root.querySelector('.composer-menu')).toBeNull();
+          act(() => view.root.querySelector(selector).click());
+          act(() => document.body.dispatchEvent(new window.PointerEvent('pointerdown', { bubbles: true, pointerType })));
+          expect(view.root.querySelector('.composer-menu')).toBeNull();
+        }
+      }
+    } finally { view.unmount(); }
+  });
+
+  test('does not reopen suggestions after clearing, Escape, or an outside touch during a request', async () => {
+    let resolveCommands;
+    const view = mount(createState(), { respond: (method) => method === METHODS.commands
+      ? new Promise((resolve) => { resolveCommands = resolve; }) : Promise.resolve({}) });
+    try {
+      for (const action of ['clear', 'escape', 'outside']) {
+        type(view.root, '/test');
+        await wait(150);
+        expect(resolveCommands).toBeFunction();
+        if (action === 'clear') type(view.root, '');
+        else if (action === 'escape') act(() => view.root.querySelector('textarea').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+        else act(() => document.body.dispatchEvent(new window.PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch' })));
+        await act(async () => resolveCommands([{ type: 'workflow', name: 'test' }]));
+        expect(view.root.querySelector('.command-picker')).toBeNull();
+        type(view.root, '/tes');
+        await wait(150);
+        await act(async () => resolveCommands([{ type: 'workflow', name: 'test' }]));
+        expect(view.root.querySelector('.command-picker')).not.toBeNull();
+        act(() => document.body.dispatchEvent(new window.PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch' })));
+        expect(view.root.querySelector('.command-picker')).toBeNull();
+      }
+    } finally { view.unmount(); }
   });
 
   test('applies queue actions and exposes Desktop-style permission and model menus', async () => {

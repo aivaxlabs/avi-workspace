@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-08
+
+### Added
+
+- Chat visualizations: callouts, findings, charts, progress, copyable text, diffs, file references and excerpts, Mermaid diagrams, and LaTeX equations with sanitized rendering and streaming fallbacks.
+- Attach files from the composer Plus menu with multiple selection, image previews, and the existing 512 KiB combined inline attachment limit.
+
+### Fixed
+
+- Dismiss composer menus and the model picker when clicking or touching outside their holder.
+- Keep cancelled command suggestions closed when delayed requests finish, and clear suggestions when their invocation is removed.
+- Preserve visualization instances while streamed response text grows.
+
+## [0.1.0]
+
 ### Added
 
 - Clickable connection signal in the instance picker opens live connection details: last call round trip, ORPC transfer rates and byte counters, failed calls, reconnections and channel state. Browser-inaccessible TCP packet loss is explicitly marked unavailable.

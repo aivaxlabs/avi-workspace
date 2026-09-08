@@ -1,0 +1,68 @@
+.markdown {
+  .visual-heading {
+    display: flex; align-items: baseline; gap: .6rem; font-size: --font-md; overflow-wrap: anywhere;
+    &.callout-success { color: --success-color; }
+    &.callout-warning { color: --warn-color; }
+    &.callout-danger, &.finding-P0, &.finding-P1 { color: --danger-color; }
+    > strong { font: bold .8rem var(--font-code); }
+  }
+  .visual-file-ref {
+    display: inline; overflow-wrap: anywhere; color: --text-secondary;
+    > i { margin-right: .35rem; }
+    > code { white-space: normal; }
+  }
+  .visual-panel {
+    min-width: 0; margin: 1rem 0; border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;
+    > header { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .65rem .8rem; background: --background-secondary;
+      > span { min-width: 0; overflow-wrap: anywhere; }
+      > button { flex: none; min-height: 36px; padding: .3rem .65rem; border: 1px solid var(--border-color); border-radius: 6px; background: --background-tertiary; cursor: pointer;
+        &:hover { background: --item-active; }
+      }
+    }
+    > pre { margin: 0; padding: .8rem; overflow-x: auto; }
+    > small { display: block; padding: .5rem .8rem; overflow-wrap: anywhere; }
+    > .visual-file-content { padding: .8rem; min-width: 0; }
+    .visual-diff > code > span { display: block; min-width: max-content;
+      &.added { color: --success-color; }
+      &.removed { color: --danger-color; }
+    }
+  }
+  .visual-async {
+    min-width: 0; max-width: 100%; margin: 1rem 0; overflow-x: auto;
+    > img { display: block; width: 100%; height: auto; background: #fff; border-radius: 6px; }
+    > pre { overflow-x: auto; }
+    .katex-display { margin: .5rem 0; }
+  }
+  .visual-chart {
+    --series-0: var(--primary-color); --series-1: var(--success-color); --series-2: var(--danger-color); --series-3: var(--text-secondary); --series-4: var(--warn-color); --series-5: var(--text-muted);
+    min-width: 0; margin: 1rem 0; padding: 1rem; border: 1px solid var(--border-color); border-radius: 8px;
+    > figcaption { font-weight: 600; margin-bottom: .8rem; overflow-wrap: anywhere; }
+    > svg { display: block; width: 100%; max-height: 240px; overflow: visible;
+      > polyline { fill: none; stroke: --primary-color; stroke-width: 3; }
+      > circle { fill: --primary-color; }
+      &.visual-pie { width: 160px; height: 160px; margin: 1rem auto;
+        > circle { fill: none; stroke: --border-color; stroke-width: 16; }
+      }
+    }
+    > ul { list-style: none; padding: 0; margin: 0; display: grid; gap: .65rem;
+      > li { display: flex; align-items: center; gap: .75rem; min-width: 0;
+        > span { flex: 1; min-width: 0; overflow-wrap: anywhere;
+          > i { display: inline-block; width: .65rem; height: .65rem; margin-right: .5rem; border-radius: 50%; }
+        }
+        > progress { flex: 1; min-width: 30px; height: .65rem; accent-color: --primary-color; }
+        > strong { font-size: --font-xs; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; max-width: 45%; }
+      }
+    }
+    .series-0 { stroke: --series-0 !important; background: --series-0; }
+    .series-1 { stroke: --series-1 !important; background: --series-1; }
+    .series-2 { stroke: --series-2 !important; background: --series-2; }
+    .series-3 { stroke: --series-3 !important; background: --series-3; }
+    .series-4 { stroke: --series-4 !important; background: --series-4; }
+    .series-5 { stroke: --series-5 !important; background: --series-5; }
+    @media (max-width: 520px) { padding: .75rem;
+      > ul > li { flex-wrap: wrap;
+        > span { flex-basis: 100%; }
+      }
+    }
+  }
+}
