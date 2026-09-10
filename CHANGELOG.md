@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- Notes auxiliary panel with folder-scoped lists, priority/date/status filters, completion/archive, list and note ordering, subtasks, move-to-list editing, and deletion confirmation.
+- `/note` uses the Desktop auxiliary model through global RPC without sending a chat message. Browser Notes attachments upload/download in 256 KiB chunks, with capability gating, progress and in-memory file handling.
+
+### Changed
+
+- Avi Relay discovery, ticket requests, and the Content Security Policy now use `https://avi-relay.aivax.net`.
+
 ## [0.2.0] - 2026-09-08
 
 ### Added

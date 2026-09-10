@@ -181,7 +181,7 @@ describe('App connections and workspace lifecycle', () => {
       if (url.endsWith('/auth/login')) return Response.json({ data: { accessToken: 'account-token' } });
       if (url.endsWith('/tickets')) {
         tickets.push(options);
-        return Response.json({ ticket: 'a'.repeat(64), expiresAt: Date.now() + 60000, protocol: 'avi-relay-v1', websocketUrl: 'wss://avi-relay.projpw.workers.dev/v1/relays/11111111-1111-1111-1111-111111111111/laptop/connect' }, { status: 201 });
+        return Response.json({ ticket: 'a'.repeat(64), expiresAt: Date.now() + 60000, protocol: 'avi-relay-v1', websocketUrl: 'wss://avi-relay.aivax.net/v1/relays/11111111-1111-1111-1111-111111111111/laptop/connect' }, { status: 201 });
       }
       return Response.json({ avis: [{ deviceId: 'laptop', name: 'Laptop', connectedAt: 1, expiresAt: Date.now() + 60000, consumers: 0 }] });
     };

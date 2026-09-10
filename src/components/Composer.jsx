@@ -7,6 +7,7 @@ import { moveQueueId, steerQueuedParams } from '../lib/queue-actions.js';
 const BUILT_INS = [
   { name: 'stop', description: 'Stop the active run' },
   { name: 'side', description: 'Open a side chat' },
+  { name: 'note', description: 'Create a user note with the auxiliary model' },
 ];
 const PERMISSIONS = [
   { id: 'ask_for_approval', label: 'Ask for approval', description: 'Ask before every tool call', icon: 'ri-shield-keyhole-line' },
@@ -25,7 +26,7 @@ function serializeDraft({ permissionMode, model, reasoningEffort, workMode, ultr
   return { permissionMode, model, reasoningEffort: reasoningEffort || null, workMode, ultraMode, draftText: text, attachments };
 }
 
-export function Composer({ client, state, models, discovery, draftCache, intelligenceLevels = [], messageDeliveryMode = 'queue', compact = false, onExpand, onSent, onStop, onSideChat, onOpenTasks, onOpenAgents, onQueueOrder, onError, composerRef }) {
+export function Composer({ client, globalClient, globalDiscovery, onNoteCreated, state, models, discovery, draftCache, intelligenceLevels = [], messageDeliveryMode = 'queue', compact = false, onExpand, onSent, onStop, onSideChat, onOpenTasks, onOpenAgents, onQueueOrder, onError, composerRef }) {
   const conversation = state.conversation;
   const snapshot = state.composer;
   const goal = conversation.goal;
@@ -281,12 +282,12 @@ export function Composer({ client, state, models, discovery, draftCache, intelli
           ? (supportsMethod(discovery, METHODS.mentions) ? ((await client.request(METHODS.mentions, { query })).paths ?? []).map((item) => ({ ...item, label: item.label ?? item.path, value: item.path })) : [])
           : supportsMethod(discovery, METHODS.commands) ? (await client.request(METHODS.commands)).filter((item) => item.type === (invocation[1] === '$' ? 'skill' : 'workflow') && (!query || item.name.toLowerCase().includes(query.toLowerCase()))).map((item) => ({ ...item, label: `${invocation[1]}${item.name}`, value: `${invocation[1]}${item.name}` })) : [];
         if (cancelled) return;
-        setOptions(invocation[1] === '/' ? [...BUILT_INS.filter((item) => supportsMethod(discovery, item.name === 'stop' ? METHODS.stop : METHODS.createSideChat)).map((item) => ({ ...item, label: `/${item.name}`, value: `/${item.name}` })), ...remote] : remote);
+        setOptions(invocation[1] === '/' ? [...BUILT_INS.filter((item) => item.name === 'note' ? supportsMethod(globalDiscovery, METHODS.generateNote) : supportsMethod(discovery, item.name === 'stop' ? METHODS.stop : METHODS.createSideChat)).map((item) => ({ ...item, label: `/${item.name}`, value: `/${item.name}` })), ...remote] : remote);
         setActiveOption(0);
       } catch { if (!cancelled) setOptions([]); }
     }, 120);
     return () => { cancelled = true; clearTimeout(timer.current); };
-  }, [discovery, invocation?.[0], invocation?.[2], client, suggestionsDismissed]);
+  }, [discovery, globalDiscovery, invocation?.[0], invocation?.[2], client, suggestionsDismissed]);
 
   useEffect(() => {
     if (!options.length) return;
@@ -367,6 +368,19 @@ export function Composer({ client, state, models, discovery, draftCache, intelli
     if (text.trim() === '/side') {
       if (!supportsMethod(discovery, METHODS.createSideChat)) return onError(new Error('Side chats are not available on this Avi instance.'));
       return Promise.resolve().then(onSideChat).catch(onError);
+    }
+    if (/^\s*\/note(?:\s|$)/i.test(text)) {
+      if (!supportsMethod(globalDiscovery, METHODS.generateNote)) return onError(new Error('Creating notes is not supported by this Avi instance.'));
+      const prompt = text.replace(/^\s*\/note\s*/i, '');
+      if (!prompt.trim()) return onError(new Error('Write the note after /note.'));
+      if (attachments.length) return onError(new Error('Remove chat attachments and add files to the saved note in Notes.'));
+      setBusy(true);
+      try {
+        await globalClient.request(METHODS.generateNote, { conversationId: conversation.id, prompt });
+        if (aliveRef.current) { setText(''); onNoteCreated?.(); }
+      } catch (failure) { if (aliveRef.current) onError(failure); }
+      finally { if (aliveRef.current) setBusy(false); }
+      return;
     }
     if (!supportsMethod(discovery, METHODS.send)) return onError(new Error('Sending messages is not available on this Avi instance.'));
     setBusy(true);

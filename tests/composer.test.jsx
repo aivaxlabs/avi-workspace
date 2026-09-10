@@ -701,4 +701,76 @@ describe('composer parity', () => {
       ultraMode: false,
     });
   });
+
+  test('/note routes to global generate, clears the draft, and notifies instead of chatting', async () => {
+    const globals = [];
+    let noted = 0;
+    const globalClient = { request(method, params) { globals.push({ method, params }); return Promise.resolve({}); } };
+    const view = mount(createState({ composer: { ...createState().composer, draftText: '', attachments: [] } }), {
+      globalClient,
+      globalDiscovery: discoveryAll,
+      onNoteCreated() { noted += 1; },
+    });
+    try {
+      type(view.root, '/note Remember the deploy steps');
+      await flush();
+      act(() => view.root.querySelector('form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })));
+      await flush();
+      expect(globals).toEqual([{ method: METHODS.generateNote, params: { conversationId: 'thread-1', prompt: 'Remember the deploy steps' } }]);
+      expect(view.calls.some((call) => call.method === METHODS.send || call.method === METHODS.startGoal)).toBe(false);
+      expect(view.root.querySelector('textarea').value).toBe('');
+      expect(noted).toBe(1);
+    } finally { view.unmount(); }
+  });
+
+  test('/note keeps the draft when generation fails', async () => {
+    const globalClient = { request() { return Promise.reject(new Error('Note failed')); } };
+    const view = mount(createState({ composer: { ...createState().composer, draftText: '', attachments: [] } }), {
+      globalClient,
+      globalDiscovery: discoveryAll,
+    });
+    try {
+      type(view.root, '/note Keep this draft');
+      await flush();
+      act(() => view.root.querySelector('form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })));
+      await flush();
+      expect(view.errors.at(-1).message).toBe('Note failed');
+      expect(view.root.querySelector('textarea').value).toBe('/note Keep this draft');
+    } finally { view.unmount(); }
+  });
+
+  test('/note without discovery sends no mutation and reports support', async () => {
+    let globals = 0;
+    const view = mount(createState({ composer: { ...createState().composer, draftText: '', attachments: [] } }), {
+      globalClient: { request() { globals += 1; return Promise.resolve({}); } },
+      globalDiscovery: discoveryWithout('generateNote'),
+    });
+    try {
+      type(view.root, '/note Unsupported here');
+      await flush();
+      act(() => view.root.querySelector('form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })));
+      await flush();
+      expect(globals).toBe(0);
+      expect(view.calls.some((call) => call.method === METHODS.send || call.method === METHODS.startGoal)).toBe(false);
+      expect(view.errors.at(-1).message).toContain('Creating notes is not supported');
+      expect(view.root.querySelector('textarea').value).toBe('/note Unsupported here');
+    } finally { view.unmount(); }
+  });
+
+  test('/note rejects chat attachments without calling generation', async () => {
+    let globals = 0;
+    const view = mount(createState(), {
+      globalClient: { request() { globals += 1; return Promise.resolve({}); } },
+      globalDiscovery: discoveryAll,
+    });
+    try {
+      type(view.root, '/note Has an attachment');
+      await flush();
+      act(() => view.root.querySelector('form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })));
+      await flush();
+      expect(globals).toBe(0);
+      expect(view.errors.at(-1).message).toContain('Remove chat attachments');
+      expect(view.root.querySelector('textarea').value).toBe('/note Has an attachment');
+    } finally { view.unmount(); }
+  });
 });

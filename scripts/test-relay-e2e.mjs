@@ -68,11 +68,11 @@ function startRelayPeer() {
   // maps that host onto the local peer inside WebSocketImpl instead of changing client code.
   const localOrigin = `ws://127.0.0.1:${server.port}`;
   class WebSocketImpl extends WebSocket {
-    constructor(url, protocols) { super(String(url).replace(/^wss:\/\/avi-relay\.projpw\.workers\.dev/, localOrigin), protocols); }
+    constructor(url, protocols) { super(String(url).replace(/^wss:\/\/avi-relay\.aivax\.net/, localOrigin), protocols); }
   }
   const fetchImpl = async (url, init) => {
     state.tickets.push({ url: String(url), authorization: init.headers.Authorization, body: JSON.parse(init.body) });
-    return Response.json({ ticket: 'a'.repeat(64), expiresAt: Date.now() + 60_000, protocol: 'avi-relay-v1', websocketUrl: `wss://avi-relay.projpw.workers.dev${TICKET_URL_PATH}` }, { status: 201 });
+    return Response.json({ ticket: 'a'.repeat(64), expiresAt: Date.now() + 60_000, protocol: 'avi-relay-v1', websocketUrl: `wss://avi-relay.aivax.net${TICKET_URL_PATH}` }, { status: 201 });
   };
   return { state, WebSocketImpl, fetchImpl, stop: () => server.stop(true) };
 }

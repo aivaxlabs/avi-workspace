@@ -4,6 +4,16 @@ export const HISTORY_PAGE_SIZE = 40;
 
 export const METHODS = Object.freeze({
   discover: 'rpc:discover',
+  noteLists: 'notes:lists',
+  saveNoteList: 'notes:save-list',
+  deleteNoteList: 'notes:delete-list',
+  searchNotes: 'notes:search',
+  getNote: 'notes:get',
+  saveNote: 'notes:save',
+  reorderNotes: 'notes:reorder',
+  generateNote: 'notes:generate',
+  uploadNoteAttachment: 'notes:upload-attachment',
+  readNoteAttachment: 'notes:read-attachment',
   listConversations: 'conversations:list',
   searchConversations: 'conversations:search',
   createConversation: 'conversations:create',
@@ -48,6 +58,22 @@ export const METHODS = Object.freeze({
 });
 
 export const ATTACHMENT_CHUNK_SIZE = 256 * 1024;
+
+export function normalizeNoteAttachmentChunk(chunk, { offset, size }) {
+  if (typeof chunk?.data !== 'string' || chunk.data.length > 349528 || chunk.offset !== offset || chunk.size !== size
+    || !Number.isInteger(chunk.bytesRead) || chunk.bytesRead < 0 || chunk.bytesRead > ATTACHMENT_CHUNK_SIZE
+    || offset + chunk.bytesRead > size || (!chunk.bytesRead && offset < size)) throw new Error('Avi returned an invalid note attachment chunk.');
+  const bytes = Uint8Array.from(atob(chunk.data), (char) => char.charCodeAt(0));
+  if (bytes.length !== chunk.bytesRead) throw new Error('Avi returned an invalid note attachment chunk.');
+  return bytes;
+}
+
+export function normalizeNoteUploadResult(result, { offset, length, size }) {
+  if (typeof result?.uploadId !== 'string' || !result.uploadId || result.offset !== offset + length
+    || result.offset > size || result.complete !== (result.offset === size)
+    || (result.complete && !Array.isArray(result.note?.attachments))) throw new Error('Avi returned an invalid note upload result.');
+  return result;
+}
 
 export function messagePageParams({ cursor = null, limit = HISTORY_PAGE_SIZE } = {}) {
   return { limit, ...(cursor ? { cursor } : {}) };

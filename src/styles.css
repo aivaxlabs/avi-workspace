@@ -2318,6 +2318,297 @@ h1, h2, h3, h4, h5, h6, strong, b, th {
         min-height: 42px;
     }
 }
+/* components\notes.xcss */
+.notes-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+    font-size: var(--font-xs);
+}
+
+.notes-panel > .notes-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.notes-panel > .notes-toolbar > input {
+    flex: 1;
+    min-width: 0;
+}
+
+.notes-panel > .notes-toolbar > button {
+    flex: none;
+}
+
+.notes-panel > .notes-scope {
+    color: var(--text-muted);
+    overflow-wrap: anywhere;
+}
+
+.notes-panel > .notes-list {
+    border-bottom: 1px solid var(--border-color);
+    padding: 8px 0;
+}
+
+.notes-panel > .notes-list > summary {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 32px;
+}
+
+.notes-panel > .notes-list > summary > strong {
+    flex: 1;
+    overflow-wrap: anywhere;
+}
+
+.notes-panel > .notes-list > summary > small {
+    color: var(--text-muted);
+}
+
+.notes-panel > .notes-list > .notes-list-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 6px 0;
+}
+
+.notes-panel > .notes-list > ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.notes-panel > .notes-list > ul > li {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px 0;
+    border-top: 1px solid var(--border-color);
+}
+
+.notes-panel > .notes-list > ul > li > input {
+    margin-top: 5px;
+    flex: none;
+}
+
+.notes-panel > .notes-list > ul > li > .notes-copy {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    align-items: flex-start;
+    min-width: 0;
+    text-align: left;
+    padding: 0;
+    gap: 4px;
+    border: 0;
+    background: none;
+}
+
+.notes-panel > .notes-list > ul > li > .notes-copy > strong {
+    overflow-wrap: anywhere;
+    font-weight: 500;
+}
+
+.notes-panel > .notes-list > ul > li > .notes-copy > span {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.notes-panel > .notes-list > ul > li > .notes-copy > small {
+    color: var(--text-muted);
+    font-size: 11px;
+}
+
+.notes-panel > .notes-list > ul > li.is-done > .notes-copy > strong {
+    color: var(--text-muted);
+    text-decoration: line-through;
+}
+
+.notes-panel .notes-options, .notes-panel .notes-filters {
+    position: relative;
+}
+
+.notes-panel .notes-options > summary, .notes-panel .notes-filters > summary {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 30px;
+    min-height: 30px;
+    cursor: pointer;
+    list-style: none;
+    border-radius: 4px;
+}
+
+.notes-panel .notes-options > summary:hover, .notes-panel .notes-filters > summary:hover {
+    background: var(--item-hover);
+}
+
+.notes-panel .notes-options > div, .notes-panel .notes-filters > div {
+    position: absolute;
+    z-index: 25;
+    right: 0;
+    top: 100%;
+    width: min(230px, 70vw);
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--background-secondary);
+    box-shadow: 0 8px 24px #0005;
+}
+
+.notes-panel .notes-options > div > button, .notes-panel .notes-filters > div > button {
+    text-align: left;
+}
+
+.notes-panel .notes-options > div > label, .notes-panel .notes-filters > div > label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.notes-panel .notes-options > div > label.notes-check, .notes-panel .notes-filters > div > label.notes-check {
+    flex-direction: row;
+    align-items: center;
+}
+
+.notes-panel input:not([type=checkbox]), .notes-panel select {
+    width: 100%;
+    min-width: 0;
+    padding: 7px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--background-secondary);
+    color: var(--text-primary);
+}
+
+.notes-panel button {
+    padding: 6px;
+}
+
+.notes-dialog-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    background: #0008;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+}
+
+.notes-dialog-backdrop > .notes-editor {
+    background: var(--background-primary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    width: min(560px, 100%);
+    max-height: calc(100dvh - 32px);
+    overflow: auto;
+    padding: 18px;
+}
+
+.notes-dialog-backdrop > .notes-editor > form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.notes-dialog-backdrop > .notes-editor > form > header, .notes-dialog-backdrop > .notes-editor > form > footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.notes-dialog-backdrop > .notes-editor > form > header > h2 {
+    font-size: var(--font-lg);
+    margin: 0;
+}
+
+.notes-dialog-backdrop > .notes-editor > form > footer {
+    justify-content: flex-end;
+}
+
+.notes-dialog-backdrop > .notes-editor > form > h3 {
+    margin: 0;
+    font-size: var(--font-sm);
+}
+
+.notes-dialog-backdrop > .notes-editor > form > small {
+    color: var(--text-muted);
+}
+
+.notes-dialog-backdrop > .notes-editor > form > label {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.notes-dialog-backdrop > .notes-editor > form input:not([type=checkbox]), .notes-dialog-backdrop > .notes-editor > form select, .notes-dialog-backdrop > .notes-editor > form textarea {
+    width: 100%;
+    min-width: 0;
+    background: var(--background-secondary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 8px;
+}
+
+.notes-dialog-backdrop > .notes-editor > form textarea {
+    resize: vertical;
+}
+
+.notes-dialog-backdrop > .notes-editor > form button {
+    padding: 7px;
+    min-height: 32px;
+}
+
+.notes-dialog-backdrop > .notes-editor > form > .notes-subtask, .notes-dialog-backdrop > .notes-editor > form > .notes-file {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.notes-dialog-backdrop > .notes-editor > form > .notes-subtask > input:not([type=checkbox]), .notes-dialog-backdrop > .notes-editor > form > .notes-file > input:not([type=checkbox]), .notes-dialog-backdrop > .notes-editor > form > .notes-subtask > span, .notes-dialog-backdrop > .notes-editor > form > .notes-file > span {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.notes-dialog-backdrop > .notes-editor > form > .notes-subtask > button, .notes-dialog-backdrop > .notes-editor > form > .notes-file > button, .notes-dialog-backdrop > .notes-editor > form > .notes-subtask > input[type=checkbox], .notes-dialog-backdrop > .notes-editor > form > .notes-file > input[type=checkbox] {
+    flex: none;
+}
+
+@media (max-width: 640px) {
+    .notes-panel button, .notes-panel summary {
+        min-height: 36px;
+    }
+
+    .notes-dialog-backdrop {
+        padding: 8px;
+    }
+
+    .notes-dialog-backdrop > .notes-editor {
+        padding: 12px;
+        max-height: calc(100dvh - 16px);
+    }
+
+    .notes-dialog-backdrop > .notes-editor > form button {
+        min-height: 36px;
+    }
+}
 /* components\workspace.xcss */
 .workspace {
     position: relative;

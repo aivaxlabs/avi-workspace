@@ -14,7 +14,7 @@ class Socket extends EventTarget {
 }
 const clients = [];
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
-const ticket = () => ({ ticket: 'a'.repeat(64), expiresAt: Date.now() + 60000, protocol: 'avi-relay-v1', websocketUrl: 'wss://avi-relay.projpw.workers.dev/v1/relays/11111111-1111-1111-1111-111111111111/device/connect' });
+const ticket = () => ({ ticket: 'a'.repeat(64), expiresAt: Date.now() + 60000, protocol: 'avi-relay-v1', websocketUrl: 'wss://avi-relay.aivax.net/v1/relays/11111111-1111-1111-1111-111111111111/device/connect' });
 const options = { deviceId: 'device', accessToken: 'account-secret', WebSocketImpl: Socket };
 afterEach(() => { for (const client of clients.splice(0)) client.close(); Socket.instances = []; });
 

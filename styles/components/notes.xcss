@@ -1,0 +1,66 @@
+.notes-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  font-size: --font-xs;
+  > .notes-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    > input { flex: 1; min-width: 0; }
+    > button { flex: none; }
+  }
+  > .notes-scope { color: --text-muted; overflow-wrap: anywhere; }
+  > .notes-list {
+    border-bottom: 1px solid --border-color;
+    padding: 8px 0;
+    > summary { cursor: pointer; display: flex; align-items: center; gap: 8px; min-height: 32px; > strong { flex: 1; overflow-wrap: anywhere; } > small { color: --text-muted; } }
+    > .notes-list-actions { display: flex; justify-content: space-between; align-items: center; margin: 6px 0; }
+    > ul {
+      list-style: none; margin: 0; padding: 0;
+      > li {
+        display: flex; align-items: flex-start; gap: 8px; padding: 10px 0; border-top: 1px solid --border-color;
+        > input { margin-top: 5px; flex: none; }
+        > .notes-copy { display: flex; flex: 1; flex-direction: column; align-items: flex-start; min-width: 0; text-align: left; padding: 0; gap: 4px; border: 0; background: none;
+          > strong { overflow-wrap: anywhere; font-weight: 500; }
+          > span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: --text-secondary; white-space: pre-wrap; overflow-wrap: anywhere; }
+          > small { color: --text-muted; font-size: 11px; }
+        }
+        &.is-done > .notes-copy > strong { color: --text-muted; text-decoration: line-through; }
+      }
+    }
+  }
+  .notes-options, .notes-filters {
+    position: relative;
+    > summary { display: flex; align-items: center; justify-content: center; min-width: 30px; min-height: 30px; cursor: pointer; list-style: none; border-radius: 4px; &:hover { background: --item-hover; } }
+    > div { position: absolute; z-index: 25; right: 0; top: 100%; width: min(230px, 70vw); padding: 10px; display: flex; flex-direction: column; gap: 7px; border: 1px solid --border-color; border-radius: 6px; background: --background-secondary; box-shadow: 0 8px 24px #0005;
+      > button { text-align: left; }
+      > label { display: flex; flex-direction: column; gap: 4px; &.notes-check { flex-direction: row; align-items: center; } }
+    }
+  }
+  input:not([type=checkbox]), select { width: 100%; min-width: 0; padding: 7px; border: 1px solid --border-color; border-radius: 4px; background: --background-secondary; color: --text-primary; }
+  button { padding: 6px; }
+  @media (max-width: 640px) { button, summary { min-height: 36px; } }
+}
+
+.notes-dialog-backdrop {
+  position: fixed; inset: 0; z-index: 100; background: #0008; display: flex; align-items: center; justify-content: center; padding: 16px;
+  > .notes-editor {
+    background: --background-primary; color: --text-primary; border: 1px solid --border-color; border-radius: 8px; width: min(560px, 100%); max-height: calc(100dvh - 32px); overflow: auto; padding: 18px;
+    > form {
+      display: flex; flex-direction: column; gap: 12px;
+      > header, > footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+      > header > h2 { font-size: --font-lg; margin: 0; }
+      > footer { justify-content: flex-end; }
+      > h3 { margin: 0; font-size: --font-sm; }
+      > small { color: --text-muted; }
+      > label { display: flex; flex-direction: column; gap: 5px; }
+      input:not([type=checkbox]), select, textarea { width: 100%; min-width: 0; background: --background-secondary; color: --text-primary; border: 1px solid --border-color; border-radius: 4px; padding: 8px; }
+      textarea { resize: vertical; }
+      button { padding: 7px; min-height: 32px; }
+      > .notes-subtask, > .notes-file { display: flex; align-items: center; gap: 5px; > input:not([type=checkbox]), > span { flex: 1; min-width: 0; overflow-wrap: anywhere; } > button, > input[type=checkbox] { flex: none; } }
+    }
+  }
+  @media (max-width: 640px) { padding: 8px; > .notes-editor { padding: 12px; max-height: calc(100dvh - 16px); > form button { min-height: 36px; } } }
+}

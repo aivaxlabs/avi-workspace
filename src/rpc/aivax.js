@@ -1,5 +1,5 @@
 export const AIVAX_LOGIN_URL = 'https://inference.aivax.net/api/v1/auth/login';
-export const AIVAX_RELAYS_URL = 'https://avi-relay.projpw.workers.dev/v1/relays';
+export const AIVAX_RELAYS_URL = 'https://avi-relay.aivax.net/v1/relays';
 
 export async function requestAivax(url, options) {
   const response = await fetch(url, { ...options, credentials: 'omit', redirect: 'error', cache: 'no-store' });
