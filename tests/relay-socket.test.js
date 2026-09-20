@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { RelaySocket } from '../src/rpc/relay-socket.js';
 import { RpcClient } from '../src/rpc/client.js';
-import { ORPC_PROTOCOL, requestFrame, responseFrames } from '../src/rpc/orpc.js';
+import { ORPC_PROTOCOL, controlFrame, requestFrame, responseFrames } from '../src/rpc/orpc.js';
 
 class Socket extends EventTarget {
   static OPEN = 1;
@@ -11,6 +11,10 @@ class Socket extends EventTarget {
   send(data) { this.sent.push(typeof data === 'string' ? JSON.parse(data) : { __frame: new TextDecoder().decode(data) }); }
   message(data) { const event = new Event('message'); event.data = typeof data === 'string' || data instanceof Uint8Array ? data : JSON.stringify(data); this.dispatchEvent(event); }
   close(code = 1000) { this.readyState = 3; const event = new Event('close'); Object.assign(event, { code }); this.dispatchEvent(event); }
+}
+async function sha256Check(bytes) {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+  return new TextEncoder().encode(`sha256:${Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('')}`);
 }
 const clients = [];
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -94,8 +98,9 @@ test('pending RPC recovers on a fresh channel with a fresh id, and Remote reject
   await connecting;
   const pending = client.request('chat:send', { text: 'once' }).catch((error) => error);
   await flush();
-  expect(first.sent).toHaveLength(2);
-  const firstAttempt = /^\d+ ORPC\/1 REQ([A-Za-z0-9_-]+) chat\.send\n(.+)$/s.exec(first.sent[1].__frame);
+  await flush();
+  expect(first.sent).toHaveLength(3);
+  const firstAttempt = /^\d+ ORPC\/1 REQ([0-9a-zA-Z_.@]+) chat\.send 1 1\n(.+)$/s.exec(first.sent[1].__frame);
   expect(firstAttempt).not.toBeNull();
 
   // Dropping the channel triggers bounded recovery, not an immediate failure.
@@ -105,18 +110,19 @@ test('pending RPC recovers on a fresh channel with a fresh id, and Remote reject
   const second = Socket.instances.at(-1);
   second.open(); second.message({ type: 'avi-remote-ready', version: 3, protocol: ORPC_PROTOCOL });
   await flush();
+  await flush();
   await new Promise((resolve) => setTimeout(resolve, 120));
-  expect(second.sent).toHaveLength(2);
-  const retryAttempt = /^\d+ ORPC\/1 REQ([A-Za-z0-9_-]+) chat\.send\n(.+)$/s.exec(second.sent[1].__frame);
+  expect(second.sent).toHaveLength(3);
+  const retryAttempt = /^\d+ ORPC\/1 REQ([0-9a-zA-Z_.@]+) chat\.send 1 1\n(.+)$/s.exec(second.sent[1].__frame);
   expect(retryAttempt).not.toBeNull();
   expect(retryAttempt[1]).not.toBe(firstAttempt[1]);
   expect(retryAttempt[2]).toBe(firstAttempt[2]);
 
   // A complete response for the retry id resolves the original call.
   const operation = JSON.parse(retryAttempt[2]);
-  for (const part of responseFrames(retryAttempt[1], 'exec-recovery-1', new TextEncoder().encode(JSON.stringify({ jsonrpc: '2.0', id: operation.operationId, result: { delivered: true } })))) {
-    second.message(part);
-  }
+  const responseBytes = new TextEncoder().encode(JSON.stringify({ jsonrpc: '2.0', id: operation.operationId, result: { delivered: true } }));
+  for (const part of responseFrames(retryAttempt[1], responseBytes)) second.message(part);
+  second.message(controlFrame('RES', `${retryAttempt[1]}#CHECKSEND`, await sha256Check(responseBytes)));
   expect(await pending).toEqual({ delivered: true });
 
   // A v3 Remote rejection is terminal: no further reconnect or replay.
@@ -154,5 +160,5 @@ test('forwards binary ORPC frames unchanged after ready', async () => {
   await flush();
   expect(received).toHaveLength(1);
   expect(Buffer.from(received[0]).equals(Buffer.from(frame))).toBe(true);
-  expect(new TextDecoder().decode(received[0])).toContain('ORPC/1 REQorpcid01 conversations.list');
+  expect(new TextDecoder().decode(received[0])).toContain('ORPC/1 REQorpcid01 conversations.list 1 1');
 });

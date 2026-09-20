@@ -89,6 +89,13 @@ function deferred() {
 }
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+async function waitForDom(description, selector, timeoutMs = 5000) {
+  const started = Date.now();
+  while (!document.querySelector(selector)) {
+    if (Date.now() - started > timeoutMs) throw new Error(`Timed out waiting for ${description} (${selector}).`);
+    await act(async () => { await flush(); });
+  }
+}
 const modelsRequested = () => FakeSocket.instances.reduce((count, socket) => count + socket.sent.filter((request) => request.method.replace('.', ':') === 'models:list').length, 0);
 const buttonByText = (text) => [...document.querySelectorAll('button')].find((button) => button.textContent.trim() === text);
 
@@ -115,7 +122,7 @@ async function renderApp() {
 
 async function openWorkspace() {
   act(() => buttonByText('Open workspace').click());
-  for (let i = 0; i < 12; i += 1) await act(async () => { await flush(); });
+  await waitForDom('workspace selector', 'select[aria-label="Active Avi instance"]');
 }
 
 describe('App connections and workspace lifecycle', () => {
@@ -192,14 +199,18 @@ describe('App connections and workspace lifecycle', () => {
       await act(async () => { document.querySelector('form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); await flush(); await flush(); });
       await act(async () => { document.querySelector('form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); await flush(); await flush(); });
       await act(async () => { buttonByText('Open workspace').click(); await flush(); });
-      for (let i = 0; i < 12; i++) await act(async () => { await flush(); });
+      await waitForDom('workspace selector', 'select[aria-label="Active Avi instance"]');
       expect(document.querySelector('select[aria-label="Active Avi instance"]')).not.toBeNull();
       const global = FakeSocket.instances.find((socket) => socket.handshake?.path === '/rpc');
       expect(global.handshake).toEqual({ type: 'avi-remote-open', version: 3, protocol: ORPC_PROTOCOL, path: '/rpc' });
       const thread = [...document.querySelectorAll('button')].find((button) => button.textContent.includes('Existing'));
       expect(thread).toBeDefined();
       await act(async () => { thread.click(); await flush(); });
-      for (let i = 0; i < 12; i++) await act(async () => { await flush(); });
+      const started = Date.now();
+      while (!FakeSocket.instances.some((socket) => socket.handshake?.path === '/rpc/conversations/streams/thread-1' && socket.sent.some((request) => request.method.replace('.', ':') === 'conversations:context'))) {
+        if (Date.now() - started > 2000) throw new Error('Timed out waiting for conversation context.');
+        await act(async () => { await flush(); });
+      }
       const stream = FakeSocket.instances.find((socket) => socket.handshake?.path === '/rpc/conversations/streams/thread-1');
       expect(stream).toBeDefined();
       expect(stream).not.toBe(global);
@@ -208,6 +219,11 @@ describe('App connections and workspace lifecycle', () => {
       expect(tickets.every((entry) => entry.headers.Authorization === 'Bearer account-token')).toBe(true);
       expect(await listConnections()).toEqual([]);
       await act(async () => { buttonByText('Connections').click(); await flush(); });
+      const closingStarted = Date.now();
+      while (global.readyState !== 3 || stream.readyState !== 3) {
+        if (Date.now() - closingStarted > 2000) throw new Error('Timed out waiting for relay shutdown.');
+        await act(async () => { await flush(); });
+      }
       expect(global.readyState).toBe(3);
       expect(stream.readyState).toBe(3);
     } finally { globalThis.fetch = originalFetch; }
@@ -245,7 +261,8 @@ describe('App connections and workspace lifecycle', () => {
     const openButton = buttonByText('Opening...');
     expect(openButton).not.toBeNull();
     expect(openButton.disabled).toBe(true);
-    await act(async () => { hold.resolve(discoveryResult()); for (let i = 0; i < 12; i += 1) await flush(); });
+    await act(async () => { hold.resolve(discoveryResult()); });
+    await waitForDom('workspace selector', 'select[aria-label="Active Avi instance"]');
     expect(document.querySelector('select[aria-label="Active Avi instance"]')).not.toBeNull();
     expect(modelsRequested()).toBe(1);
   });
@@ -301,7 +318,7 @@ describe('App connections and workspace lifecycle', () => {
       await flush(); await flush();
     });
     hold.resolve(discoveryResult());
-    await act(async () => { for (let i = 0; i < 12; i += 1) await flush(); });
+    await waitForDom('workspace selector', 'select[aria-label="Active Avi instance"]');
     const select = document.querySelector('select[aria-label="Active Avi instance"]');
     expect(select).not.toBeNull();
     expect(select.value).toBe(beta.id);

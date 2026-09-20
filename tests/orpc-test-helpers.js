@@ -1,25 +1,48 @@
-import { ORPC_PROTOCOL, parseFrame, requestFrame, responseFrames } from '../src/rpc/orpc.js';
+import {
+  ORPC_PROTOCOL,
+  controlFrame,
+  parseFrame,
+  requestFrame,
+  requestFrames,
+  responseFrames,
+} from '../src/rpc/orpc.js';
 
 export { ORPC_PROTOCOL };
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
+export function newId() {
+  return crypto.randomUUID().replaceAll('-', '');
+}
+
 export function utf8Bytes(value) {
   return textEncoder.encode(typeof value === 'string' ? value : JSON.stringify(value));
+}
+
+export async function sha256Check(content) {
+  const bytes = content instanceof Uint8Array ? content : utf8Bytes(content);
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+  const hex = Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  return textEncoder.encode(`sha256:${hex}`);
 }
 
 export function encodeRequestFrame(id, method, content) {
   return requestFrame(id, method, content instanceof Uint8Array ? content : utf8Bytes(content));
 }
 
-export function encodeResponseFrame(id, content, execution = crypto.randomUUID()) {
-  const [frame] = responseFrames(id, execution, content instanceof Uint8Array ? content : utf8Bytes(content));
-  return frame;
+export async function responseTransfer(id, content) {
+  const bytes = content instanceof Uint8Array ? content : utf8Bytes(content);
+  return [...responseFrames(id, bytes), controlFrame('RES', `${id}#CHECKSEND`, await sha256Check(bytes))];
 }
 
-export function eventFrame(method, params, { eventId = crypto.randomUUID(), expiresAt = Date.now() + 60_000, id = crypto.randomUUID() } = {}) {
-  return encodeRequestFrame(id, String(method).replace(':', '.'), { eventId, expiresAt, params });
+export async function requestTransfer(id, method, content) {
+  const bytes = content instanceof Uint8Array ? content : utf8Bytes(content);
+  return [...requestFrames(id, method, bytes), controlFrame('REQ', `${id}#CHECKSEND`, await sha256Check(bytes))];
+}
+
+export async function eventFrame(method, params, { eventId = newId(), expiresAt = Date.now() + 60_000, id = newId() } = {}) {
+  return requestTransfer(id, String(method).replace(':', '.'), { eventId, expiresAt, params });
 }
 
 export function decodeWireFrame(bytes) {
@@ -44,6 +67,18 @@ export async function until(condition, timeoutMs = 2_000) {
   }
 }
 
+function reassemble(parts, final) {
+  let bytes = 0;
+  for (let part = 1; part <= final; part++) bytes += parts.get(part).content.length;
+  const result = new Uint8Array(bytes);
+  let offset = 0;
+  for (let part = 1; part <= final; part++) {
+    result.set(parts.get(part).content, offset);
+    offset += parts.get(part).content.length;
+  }
+  return result;
+}
+
 export class FakeSocket extends EventTarget {
   static OPEN = 1;
   static instances = [];
@@ -57,6 +92,7 @@ export class FakeSocket extends EventTarget {
     this.readyState = 0;
     this.rawSent = [];
     this.sent = [];
+    this.transfers = new Map();
     FakeSocket.instances.push(this);
     if (autoOpen) queueMicrotask(() => this.open());
   }
@@ -74,22 +110,99 @@ export class FakeSocket extends EventTarget {
       return;
     }
     this.rawSent.push(value);
-    const frame = decodeWireFrame(value);
-    if (frame.type === 'REQ') {
-      this.sent.push(frame);
-      const fixture = { ...frame, method: frame.method.replace('.', ':') };
-      queueMicrotask(() => this.respond?.(this, fixture));
+    const frame = parseFrame(value);
+    if (frame.control) {
+      this.receiveControl(frame);
+      return;
+    }
+    if (frame.type !== 'REQ' || frame.baseId === undefined) return;
+    let transfer = this.transfers.get(frame.baseId);
+    if (!transfer) {
+      transfer = { method: frame.method, parts: new Map(), final: null, body: null, responded: false };
+      this.transfers.set(frame.baseId, transfer);
+    }
+    if (transfer.method !== frame.method || transfer.body) return;
+    transfer.parts.set(frame.part, frame);
+    if (frame.final) transfer.final = frame.part;
+    if (transfer.final !== null && transfer.parts.size === transfer.final) {
+      transfer.body = reassemble(transfer.parts, transfer.final);
     }
   }
 
-  message(document) {
-    let data = document;
-    if (!(document instanceof Blob) && !ArrayBuffer.isView(document) && !(document instanceof ArrayBuffer)) {
-      if (document?.type) data = JSON.stringify(document);
-      else if (document?.id != null) data = encodeResponseFrame(document.id, document.error !== undefined ? { error: document.error } : { result: document.result ?? null });
-      else if (document?.method) data = eventFrame(document.method, document.params ?? {});
+  async receiveControl(frame) {
+    const { type, baseId, control } = frame;
+    const reply = type === 'REQ' ? 'RES' : 'REQ';
+    if (!baseId) {
+      if (control === 'PING') this.deliver(controlFrame('RES', '#PONG'));
+      else if (control === 'EXIT') this.deliver(controlFrame('RES', '#BYE'));
+      return;
     }
-    this.dispatchEvent(new MessageEvent('message', { data }));
+    if (control === 'CHECKSEND' && type === 'REQ') {
+      const transfer = this.transfers.get(baseId);
+      if (!transfer?.body || transfer.responded) {
+        this.deliver(controlFrame('RES', `${baseId}#CHECKFAIL`));
+        return;
+      }
+      transfer.responded = true;
+      const expected = textDecoder.decode(await sha256Check(transfer.body));
+      const hashes = textDecoder.decode(frame.content).split(';');
+      if (!hashes.length || !hashes.every((hash) => hash === expected)) {
+        this.deliver(controlFrame('RES', `${baseId}#CHECKFAIL`));
+        return;
+      }
+      const text = textDecoder.decode(transfer.body);
+      let json;
+      try { json = JSON.parse(text); } catch { json = undefined; }
+      const fixture = { type: 'REQ', id: baseId, baseId, method: transfer.method.replace('.', ':'), part: 1, final: true, content: transfer.body, text, json };
+      this.sent.push(fixture);
+      queueMicrotask(() => {
+        try {
+          const answered = this.respond?.(this, fixture);
+          if (answered instanceof Promise) answered.catch(() => {});
+        } catch {}
+      });
+    } else if (control === 'CHECKSEND' && type === 'RES') {
+      this.deliver(controlFrame('REQ', `${baseId}#CHECKOK`));
+    } else if (control === 'CANCEL' && type === 'REQ') {
+      this.transfers.delete(baseId);
+      this.deliver(controlFrame('RES', `${baseId}#CANCELACK`));
+    }
+  }
+
+  deliver(frame) {
+    this.dispatchEvent(new MessageEvent('message', { data: frame }));
+  }
+
+  message(document) {
+    if (document instanceof Promise) {
+      document.then((resolved) => this.message(resolved));
+      return;
+    }
+    if (Array.isArray(document)) {
+      for (const frame of document) this.deliver(frame);
+      return;
+    }
+    if (document instanceof Blob || ArrayBuffer.isView(document) || document instanceof ArrayBuffer) {
+      this.deliver(document);
+      return;
+    }
+    if (typeof document === 'string') {
+      this.deliver(textEncoder.encode(document));
+      return;
+    }
+    if (document?.type) {
+      this.deliver(JSON.stringify(document));
+      return;
+    }
+    if (document?.id != null) {
+      const content = document.error !== undefined ? { error: document.error } : { result: document.result ?? null };
+      responseTransfer(document.id, content).then((frames) => this.message(frames));
+      return;
+    }
+    if (document?.method) {
+      const { method, params = {}, eventId = newId(), expiresAt = Date.now() + 60_000 } = document;
+      this.message(eventFrame(method, params, { eventId, expiresAt }));
+    }
   }
 
   close(code = 1000, reason = '') {

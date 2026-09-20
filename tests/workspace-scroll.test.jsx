@@ -93,7 +93,10 @@ describe('workspace initial scroll', () => {
         onExit() {},
       }), root));
 
-      await act(async () => new Promise((resolve) => setTimeout(resolve, 30)));
+      {
+        const started = Date.now();
+        while (!root.querySelector('.conversation-scroll .message') && Date.now() - started < 2000) await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+      }
 
       expect(root.querySelector('.chat-area').style.getPropertyValue('--composer-clearance')).toBe('312px');
     } finally {
@@ -126,7 +129,10 @@ describe('workspace initial scroll', () => {
         onExit() {},
       }), root));
 
-      await act(async () => new Promise((resolve) => setTimeout(resolve, 30)));
+      {
+        const started = Date.now();
+        while (!root.querySelector('.conversation-scroll .message') && Date.now() - started < 2000) await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+      }
 
       const area = root.querySelector('.conversation-scroll');
       expect(root.querySelectorAll('.message.user')).toHaveLength(2);
@@ -169,7 +175,10 @@ describe('workspace initial scroll', () => {
         onExit() {},
       }), root));
 
-      await act(async () => new Promise((resolve) => setTimeout(resolve, 30)));
+      {
+        const started = Date.now();
+        while (!root.querySelector('.conversation-scroll .message') && Date.now() - started < 2000) await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+      }
       const area = root.querySelector('.conversation-scroll');
       expect(root.querySelector('.composer-wrap').classList.contains('is-compact')).toBeFalse();
 

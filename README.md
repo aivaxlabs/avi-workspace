@@ -26,17 +26,17 @@ You need a running Avi instance with remote access configured. This website host
 
 ## Overview
 
-A static Preact client for operating an Avi instance through its browser-safe RPC API — ORPC Draft 1 binary frames (`avi-orpc-draft1`) carrying UTF-8 JSON payloads. This is a remote workspace view, not an Electron port: it contains no Node/Electron bridge and never attempts to read the server machine's filesystem directly.
+A static Preact client for operating an Avi instance through its browser-safe RPC API — ORPC Draft 2 multipart binary frames (`avi-orpc-draft2`) carrying UTF-8 JSON payloads. This is a remote workspace view, not an Electron port: it contains no Node/Electron bridge and never attempts to read the server machine's filesystem directly.
 
 ## Status
 
-Functional vertical slice targeting **RPC API v1** only, over the ORPC Draft 1 transport. The client calls `rpc:discover`, displays the negotiated API version, and rejects unknown, missing, older, or newer versions. There is intentionally no legacy transport or authentication fallback. `bun test` provides automated unit and DOM coverage; behavior against a live Avi instance is not yet verified in real-world use.
+Functional vertical slice targeting **RPC API v1** only, over the ORPC Draft 2 transport. The client calls `rpc:discover`, displays the negotiated API version, and rejects unknown, missing, older, or newer versions. There is intentionally no legacy transport or authentication fallback. `bun test` provides automated unit and DOM coverage; behavior against a live Avi instance is not yet verified in real-world use.
 
 ## AIVAX remote relay
 
 Next to **Add connection**, **Login with AIVAX** asks for the account login key delivered by email. It exchanges `{ loginKey }` at `https://inference.aivax.net/api/v1/auth/login`, then uses `data.accessToken` as a Bearer credential for `GET https://avi-relay.aivax.net/v1/relays`. The dialog displays the remote computers without individual connection actions. **Approve account** saves the access token in IndexedDB and adds every returned device to the main remote-instance list. Every time the Connections page opens, the saved token automatically fetches the current devices without asking for another login key. Open an instance from the main list; all discovered instances also appear in the workspace switcher. Manual refresh updates the list, and **Log out** removes the saved token and account devices. The login key is cleared after authentication and is never persisted. Authentication rejection clears the saved token and asks for login again; temporary service failures retain it for retry. Requests omit cookies and reject redirects.
 
-`src/rpc/relay-socket.js` acquires a fresh consumer ticket for each attempt and negotiates `avi-relay-v1` with the ticket subprotocol. AIVAX authentication replaces the Avi Remote key on WAN: the first application frame is `{ type: 'avi-remote-open', version: 3, protocol: 'avi-orpc-draft1', path }` with no credential, and RPC becomes available only after `{ type: 'avi-remote-ready', version: 3, protocol: 'avi-orpc-draft1' }`; legacy version 1 and 2 handshakes are rejected instead of being accepted. The global `/rpc` route and selected `/rpc/conversations/streams/:id` route use independent consumers. Switching threads closes the previous stream; exiting closes both channels.
+`src/rpc/relay-socket.js` acquires a fresh consumer ticket for each attempt and negotiates `avi-relay-v1` with the ticket subprotocol. AIVAX authentication replaces the Avi Remote key on WAN: the first application frame is `{ type: 'avi-remote-open', version: 3, protocol: 'avi-orpc-draft2', path }` with no credential, and RPC becomes available only after `{ type: 'avi-remote-ready', version: 3, protocol: 'avi-orpc-draft2' }`; legacy version 1 and 2 handshakes are rejected instead of being accepted. The global `/rpc` route and selected `/rpc/conversations/streams/:id` route use independent consumers. Switching threads closes the previous stream; exiting closes both channels.
 
 Heartbeat uses versioned `avi-remote-ping/pong` frames (version 3), with a 60-second deadline. Transient failures retry with jittered exponential backoff (approximately 1–30 seconds), reset only after 30 stable seconds. Authentication/protocol/limit failures stop retries. Incomplete ORPC deliveries recover with at most one retry that keeps the same operation token under a fresh request id; the Desktop journal deduplicates it. Cancellation is delivery-only — a timed-out operation may still execute — so a lost outcome (`OUTCOME_UNKNOWN`) or a non-retryable failure is followed by state recovery, never blind command replay. Reconnection refreshes discovery and authoritative conversation context while preserving older loaded messages and the composer. Payloads and outgoing buffers/rates are bounded; this is not an unlimited transport.
 
@@ -45,7 +45,7 @@ Direct connections remain unchanged and keep the Avi API key; relay sessions aut
 ## Architecture
 
 - `src/rpc/contracts.js` — final-contract method names, API compatibility, pagination, and wire-shape adapters. Protocol uncertainty is isolated here.
-- `src/rpc/client.js` — ORPC request correlation, acknowledged events, timeout handling, strict subprotocol negotiation, reconnect behavior, and errors. The bundled [ORPC Draft 1 specification](docs/orpc-spec.md) documents the wire format.
+- `src/rpc/client.js` — ORPC request correlation, acknowledged events, timeout handling, strict subprotocol negotiation, reconnect behavior, and errors. The bundled [ORPC Draft 2 specification](docs/orpc-spec.md) documents the wire format.
 - `src/storage/connections.js` — the only browser persistence boundary.
 - `src/state/` — pure memory-only UI and authoritative conversation reducers.
 - `src/components/` — Connections, sidebar, conversation lifecycle, rich messages, composer, interruptions, and auxiliary tabs.
@@ -81,10 +81,10 @@ The browser checks and downloads service-worker updates in the background. There
 
 The browser sends WebSocket subprotocols:
 
-1. `avi-orpc-draft1`
+1. `avi-orpc-draft2`
 2. `avi-api-key.<base64url UTF-8 API key>`
 
-The server-selected protocol must be exactly `avi-orpc-draft1`. API keys are never put in URLs.
+The server-selected protocol must be exactly `avi-orpc-draft2`. API keys are never put in URLs.
 
 IndexedDB stores direct connection records (`id`, `label`, `serverUrl`, `apiKey`, `createdAt`, and `updatedAt`) and the approved AIVAX access token in a separate account store. The token is a browser-persisted credential, accessible to code running on this origin; use logout to remove it on shared browsers. Unsupported fields are rejected at the storage boundary. Layout dimensions, theme, active connection/thread, discovery results, messages, tasks, files, attachment bytes, queues, approvals, and all other UI/remote state stay in memory. The code does not use localStorage or sessionStorage. The production service worker uses CacheStorage only for the public, versioned application shell (HTML, JavaScript, CSS, fonts, icons and manifest), never for RPC traffic, API keys, conversations or attachments. Composer drafts are read/saved only with remote `composer-state:*` methods when advertised by discovery.
 
@@ -94,7 +94,7 @@ Remote attachments are fetched only after the user chooses **Load preview** and 
 
 The implementation consumes only the final RPC v1 browser contract:
 
-- transport: ORPC Draft 1 binary frames on the `avi-orpc-draft1` subprotocol; dotted wire methods (`folders.list`) over the colon application names (`folders:list`); requests carry `{ operationId, expiresAt, params }`
+- transport: ORPC Draft 2 multipart binary frames on the `avi-orpc-draft2` subprotocol; dotted wire methods (`folders.list`) over the colon application names (`folders:list`); requests and responses use multipart `REQ`/`RES` frames with base IDs `[0-9a-zA-Z_.@]+` (max 64) and no execution ID. This Avi binding targets 64 KiB frames (1 MiB maximum), 32 MiB reconstructed request/response bodies, 64 MiB aggregate transfer, 8192 parts, 64 concurrent operations, a 64 MiB queue, 1 MiB/s and 64 frames/s; it uses 60 s attempt and 150 s overall deadlines with one retry. After every reconstructed request and response, `CHECKSEND` with lowercase `sha256:<64 hex>` is mandatory; all supplied hashes must match before execution or success, and unsupported algorithms produce `CHECKFAIL`.
 - global socket: `/rpc`
 - conversation socket: `/rpc/conversations/streams/:id`
 - discovery: `rpc:discover`, returning `versions.rpc === 1` and a `methods` string array

@@ -89,27 +89,31 @@ describe('workspace mobile shell', () => {
       discovery: { versions: { rpc: 1 }, methods: ['conversations:list'] },
       conversations: [{ id: 'thread-1', title: 'Scoped thread' }], models: [], folders: [], onRefresh: async () => {}, onExit() {},
     }), root));
-    await act(async () => {
+    {
       const started = Date.now();
-      while (!root.querySelector('.thinking-summary') && Date.now() - started < 2000) await new Promise((resolve) => setTimeout(resolve, 10));
-    });
+      while (!root.querySelector('.thinking-summary') && Date.now() - started < 2000) await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    }
     act(() => root.querySelector('.thinking-summary').click());
     act(() => root.querySelector('.tool-line').click());
-    await act(async () => {
+    {
       const started = Date.now();
-      while (!root.textContent.includes('Actual tool output') && Date.now() - started < 2000) await new Promise((resolve) => setTimeout(resolve, 10));
-    });
+      while (!root.textContent.includes('Actual tool output') && Date.now() - started < 2000) await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    }
     expect(root.textContent).toContain('Actual tool output');
     expect(root.textContent).not.toContain('Tool details are not available');
     const socket = FakeSocket.instances.at(-1);
     expect(socket.requests.some((request) => request.method === 'conversations:tool-call-details')).toBe(true);
     socket.methods = ['conversations:context'];
     act(() => socket.message({ jsonrpc: '2.0', method: 'conversation:ready', params: { sequence: 0, conversationId: 'thread-1' } }));
-    await act(async () => {
+    {
       const started = Date.now();
-      while (socket.requests.filter((request) => request.method === 'rpc:discover').length < 2 && Date.now() - started < 2000) await new Promise((resolve) => setTimeout(resolve, 10));
-    });
+      while (socket.requests.filter((request) => request.method === 'rpc:discover').length < 2 && Date.now() - started < 2000) await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    }
     expect(socket.requests.filter((request) => request.method === 'rpc:discover')).toHaveLength(2);
+    {
+      const started = Date.now();
+      while (!root.textContent.includes('Tool details are not available') && Date.now() - started < 2000) await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    }
     expect(root.textContent).toContain('Tool details are not available');
   });
 
@@ -186,11 +190,17 @@ describe('workspace mobile shell', () => {
       onExit() {},
     }), root));
 
-    await act(async () => new Promise((resolve) => setTimeout(resolve, 30)));
+    {
+      const started = Date.now();
+      while (!root.querySelector('.conversation-scroll .message') && Date.now() - started < 2000) await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    }
 
     const header = root.querySelector('.mobile-header');
     act(() => FakeSocket.instances.at(-1).message({ jsonrpc: '2.0', method: 'conversation:event', params: { sequence: 1, event: { type: 'error', message: 'Remote run failed' } } }));
-    await act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
+    {
+      const started = Date.now();
+      while (!root.querySelector('.workspace-connection-alert') && Date.now() - started < 2000) await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    }
     expect(root.querySelector('.workspace-connection-alert').textContent).toContain('Remote run failed');
     act(() => root.querySelector('[aria-label="Dismiss error"]').click());
     expect(root.querySelector('.workspace-connection-alert')).toBeNull();

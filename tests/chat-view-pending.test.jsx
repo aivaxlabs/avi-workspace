@@ -83,7 +83,10 @@ describe('chat view pending queue messages', () => {
       onExit() {},
     }), root));
 
-    await act(async () => new Promise((resolve) => setTimeout(resolve, 30)));
+    {
+      const started = Date.now();
+      while (!root.textContent.includes('Sent answer') && Date.now() - started < 2000) await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    }
 
     const timeline = root.querySelector('.conversation-scroll');
     expect(timeline.textContent).toContain('Sent request');

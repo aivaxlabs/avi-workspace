@@ -28,6 +28,7 @@ export class RpcClient extends EventTarget {
     this.events = new Map();
     this.metrics = { sentBytes: 0, receivedBytes: 0, completed: 0, failed: 0, cancelled: 0, latencyMs: null, latencyMinMs: null, latencyMaxMs: null, latencyTotalMs: 0, lastResponseAt: null, connectedAt: null, reconnects: 0 };
     this.peer = new OrpcPeer({
+      integrity: true,
       send: (frame) => {
         this.socket.send(frame);
         this.metrics.sentBytes += frame.byteLength;
@@ -38,7 +39,12 @@ export class RpcClient extends EventTarget {
         this.dispatchEvent(new CustomEvent('protocol-error', { detail: error }));
         this.socket?.close(error.code === 'LIMIT' ? 1009 : 1002, error.code);
       },
+      onClose: () => {
+        this.closed = true;
+        this.socket?.close(1000, 'ORPC shutdown');
+      },
       onRequest: (method, bytes) => {
+        if (this.closed) return new Uint8Array();
         const content = utf8Text(bytes);
         const event = JSON.parse(content);
         if (!event.eventId || !Number.isFinite(event.expiresAt) || event.expiresAt < Date.now()) throw new OrpcError('Invalid or expired event');
@@ -146,7 +152,7 @@ export class RpcClient extends EventTarget {
 
   async handleMessage(raw, source = this.socket) {
     const value = raw instanceof Blob ? await raw.arrayBuffer() : raw;
-    if (this.socket !== source || source?.readyState !== this.WebSocketImpl.OPEN || this.closed) return;
+    if (this.socket !== source || source?.readyState !== this.WebSocketImpl.OPEN || (this.closed && !this.peer.closing)) return;
     this.metrics.receivedBytes += value?.byteLength ?? 0;
     this.peer.receive(value);
   }
@@ -184,9 +190,15 @@ export class RpcClient extends EventTarget {
     clearTimeout(this.stableTimer);
     clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
-    this.peer.terminate();
     this.events.clear();
-    this.socket?.close(1000, 'Client closed');
+    const socket = this.socket;
+    if (socket?.readyState === this.WebSocketImpl.OPEN) {
+      return this.peer.shutdown().catch((error) => {
+        this.dispatchEvent(new CustomEvent('protocol-error', { detail: error }));
+      });
+    }
+    this.peer.terminate();
+    socket?.close(1000, 'Client closed');
     this.socket = null;
   }
 }

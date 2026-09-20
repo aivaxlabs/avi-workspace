@@ -9,6 +9,7 @@
 
 ### Changed
 
+- **Breaking:** RPC now requires ORPC Draft 2 (`avi-orpc-draft2`) with multipart requests/responses, fresh recovery IDs, reserved cancellation/integrity/heartbeat/shutdown controls, and mandatory SHA-256 `CHECKSEND` verification. Upgrade Desktop and Workspace together; no Draft 1 fallback is provided. The physical `avi-relay-v1` transport is unchanged. Updated the RPC documentation and bundled specification.
 - Avi Relay discovery, ticket requests, and the Content Security Policy now use `https://avi-relay.aivax.net`.
 
 ## [0.2.0] - 2026-09-08

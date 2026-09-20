@@ -15,22 +15,27 @@ async function connectClient(options = {}) {
   return { client, socket: FakeSocket.instances.at(-1) };
 }
 
-describe('RpcClient over ORPC Draft1', () => {
-  test('requires the avi-orpc-draft1 subprotocol and keeps the API key out of the URL', async () => {
+async function closeClient(client) {
+  await client.close();
+}
+
+describe('RpcClient over ORPC Draft 2', () => {
+  test('requires the avi-orpc-draft2 subprotocol and keeps the API key out of the URL', async () => {
     FakeSocket.instances.length = 0;
     const client = new RpcClient({ url: 'ws://localhost/rpc', apiKey: 'secret key', reconnect: false, WebSocketImpl: FakeSocket });
     await expect(client.connect()).resolves.toBe(client);
     const socket = FakeSocket.instances.at(-1);
+    expect(ORPC_PROTOCOL).toBe('avi-orpc-draft2');
     expect(socket.protocols[0]).toBe(ORPC_PROTOCOL);
     expect(socket.protocols[1]).toStartWith('avi-api-key.');
     expect(socket.url).not.toContain('secret');
-    client.close();
+    await closeClient(client);
 
     const rejected = new RpcClient({ url: 'ws://localhost/rpc', apiKey: 'key', reconnect: false, WebSocketImpl: ManualSocket });
     const rejectedConnect = rejected.connect();
     ManualSocket.instances.at(-1).open('avi-rpc-v1');
     await expect(rejectedConnect).rejects.toThrow('unsupported WebSocket protocol');
-    rejected.close();
+    await closeClient(rejected);
   });
 
   test('rejects deterministically when the socket closes before opening', async () => {
@@ -41,26 +46,33 @@ describe('RpcClient over ORPC Draft1', () => {
     expect(client.connectPromise).toBeNull();
   });
 
-  test('sends a length-prefixed binary REQ with a dotted method and correlates the JSON result', async () => {
+  test('sends multipart-capable REQ with hash checksum and correlates the JSON result', async () => {
     const { client, socket } = await connectClient();
     const pending = client.request('rpc:discover', { compact: true });
-    await until(() => socket.rawSent.length === 1);
+    await until(() => socket.sent.length === 1);
+    expect(socket.rawSent).toHaveLength(2);
 
     const wire = new TextDecoder().decode(socket.rawSent[0]);
     const prefixLength = wire.indexOf(' ');
     expect(Number(wire.slice(0, prefixLength))).toBe(new TextEncoder().encode(wire.slice(prefixLength + 1)).length);
-    expect(wire.slice(prefixLength + 1)).toStartWith(`ORPC/1 REQ${socket.sent[0].id} rpc.discover\n`);
+    expect(wire.slice(prefixLength + 1)).toStartWith(`ORPC/1 REQ${socket.sent[0].id} rpc.discover 1 1\n`);
+
+    const check = decodeWireFrame(socket.rawSent[1]);
+    expect(check.type).toBe('REQ');
+    expect(check.baseId).toBe(socket.sent[0].id);
+    expect(check.control).toBe('CHECKSEND');
+    expect(check.text).toMatch(/^sha256:[0-9a-f]{64}$/);
 
     const request = socket.sent[0];
     const now = Date.now();
-    expect(request.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(request.id).toMatch(/^[0-9a-f]{32}$/);
     expect(request.json.operationId).toMatch(/^[0-9a-f-]{36}$/);
     expect(request.json.expiresAt).toBeGreaterThan(now + 170 * SECOND);
     expect(request.json.params).toEqual({ compact: true });
 
     socket.message({ id: request.id, result: { apiVersion: 1 } });
     await expect(pending).resolves.toEqual({ apiVersion: 1 });
-    expect(client.metrics.sentBytes).toBe(socket.rawSent[0].byteLength);
+    expect(client.metrics.sentBytes).toBe(socket.rawSent.reduce((total, raw) => total + raw.byteLength, 0));
     expect(client.metrics.receivedBytes).toBeGreaterThan(0);
     expect(client.metrics.completed).toBe(1);
     expect(client.metrics.failed).toBe(0);
@@ -80,7 +92,7 @@ describe('RpcClient over ORPC Draft1', () => {
     expect(client.metrics.latencyMinMs).toBe(Math.min(firstLatency, secondLatency));
     expect(client.metrics.latencyMaxMs).toBe(Math.max(firstLatency, secondLatency));
     expect(client.metrics.latencyTotalMs).toBe(firstLatency + secondLatency);
-    client.close();
+    await closeClient(client);
   });
 
   test('maps an error payload to RpcError with code and data', async () => {
@@ -90,7 +102,7 @@ describe('RpcClient over ORPC Draft1', () => {
     socket.message({ id: socket.sent[0].id, error: { code: 'METHOD_NOT_FOUND', message: 'Method not found', data: { retryable: false } } });
     await expect(pending).rejects.toBeInstanceOf(RpcError);
     await expect(pending).rejects.toMatchObject({ code: 'METHOD_NOT_FOUND', message: 'Method not found', data: { retryable: false } });
-    client.close();
+    await closeClient(client);
   });
 
   test('correlates concurrent requests independently of response order', async () => {
@@ -104,54 +116,60 @@ describe('RpcClient over ORPC Draft1', () => {
     socket.message({ id: a.id, result: [] });
     await expect(first).resolves.toEqual([]);
     await expect(second).resolves.toEqual({ models: [] });
-    client.close();
+    await closeClient(client);
   });
 
-  test('acks server events once, deduplicates identical redeliveries, and maps dotted methods to colons', async () => {
+  test('acks server events with hash-verified responses, deduplicates redeliveries, maps dotted methods', async () => {
     const { client, socket } = await connectClient();
     const notifications = [];
     client.addEventListener('notification', (event) => notifications.push(event.detail));
     const expiresAt = Date.now() + 60 * SECOND;
-    socket.message(eventFrame('conversation.ready', { sequence: 1 }, { eventId: 'evt-1', expiresAt, id: 'srv-req-1' }));
-    await until(() => socket.rawSent.length === 1);
-    const ack = decodeWireFrame(socket.rawSent[0]);
+    socket.message(await eventFrame('conversation.ready', { sequence: 1 }, { eventId: 'evt-1', expiresAt, id: 'srvreq1' }));
+    await until(() => socket.rawSent.length === 3);
+    const ack = socket.rawSent.map(decodeWireFrame).find((frame) => frame.type === 'RES' && !frame.control);
     expect(ack.type).toBe('RES');
-    expect(ack.id).toBe('srv-req-1');
+    expect(ack.id).toBe('srvreq1');
     expect(ack.final).toBe(true);
     expect(ack.text).toBe('OK');
+    const ackCheck = socket.rawSent.map(decodeWireFrame).find((frame) => frame.type === 'RES' && frame.control === 'CHECKOK');
+    expect(ackCheck?.baseId).toBe('srvreq1');
+    expect(ackCheck.text).toBe('');
     expect(notifications).toEqual([{ method: 'conversation:ready', params: { sequence: 1 } }]);
 
-    socket.message(eventFrame('conversation.ready', { sequence: 1 }, { eventId: 'evt-1', expiresAt, id: 'srv-req-2' }));
-    await until(() => socket.rawSent.length === 2);
-    expect(decodeWireFrame(socket.rawSent[1]).text).toBe('OK');
+    socket.message(await eventFrame('conversation.ready', { sequence: 1 }, { eventId: 'evt-1', expiresAt, id: 'srvreq2' }));
+    await until(() => socket.rawSent.filter((raw) => !decodeWireFrame(raw).control).length === 2);
+    expect(socket.rawSent.map(decodeWireFrame).filter((frame) => frame.type === 'RES' && !frame.control).at(-1).text).toBe('OK');
     expect(notifications).toEqual([{ method: 'conversation:ready', params: { sequence: 1 } }]);
-    client.close();
+    await closeClient(client);
   });
 
   test('closes the channel on an expired event', async () => {
     const { client, socket } = await connectClient();
     const errors = [];
     client.addEventListener('protocol-error', (event) => errors.push(event.detail));
-    socket.message(eventFrame('conversation.ready', { sequence: 1 }, { eventId: 'evt-x', expiresAt: Date.now() - 1 }));
+    socket.message(await eventFrame('conversation.ready', { sequence: 1 }, { eventId: 'evt-x', expiresAt: Date.now() - 1 }));
     await until(() => socket.readyState === 3);
     expect(errors.map((error) => `${error.code}: ${error.message}`)).toEqual(['PROTOCOL: Invalid or expired event']);
-    client.close();
+    await closeClient(client);
   });
 
   test('closes the channel on a conflicting event identifier', async () => {
     const { client, socket } = await connectClient();
     const errors = [];
     client.addEventListener('protocol-error', (event) => errors.push(event.detail));
-    socket.message(eventFrame('conversation.ready', { sequence: 1 }, { eventId: 'evt-1', expiresAt: Date.now() + 60 * SECOND, id: 'req-1' }));
-    await until(() => socket.rawSent.length === 1);
-    socket.message(eventFrame('conversation.ready', { sequence: 2 }, { eventId: 'evt-1', expiresAt: Date.now() + 60 * SECOND, id: 'req-2' }));
+    socket.message(await eventFrame('conversation.ready', { sequence: 1 }, { eventId: 'evt-1', expiresAt: Date.now() + 60 * SECOND, id: 'req1' }));
+    await until(() => socket.rawSent.some((wire) => {
+      const frame = decodeWireFrame(wire);
+      return frame.type === 'RES' && frame.id === 'req1#CHECKSEND';
+    }));
+    socket.message(await eventFrame('conversation.ready', { sequence: 2 }, { eventId: 'evt-1', expiresAt: Date.now() + 60 * SECOND, id: 'req2' }));
     await until(() => socket.readyState === 3);
     expect(errors.map((error) => error.message)).toEqual(['Conflicting event identifier']);
-    client.close();
+    await closeClient(client);
   });
 
   test('retries after an attempt timeout with a fresh frame id and the identical envelope', async () => {
-    const { client, socket } = await connectClient({ timeoutMs: 40 });
+    const { client, socket } = await connectClient({ timeoutMs: 400 });
     const pending = client.request('chat:send', { text: 'hello' });
     await until(() => socket.sent.length === 1);
     const first = socket.sent[0];
@@ -162,7 +180,7 @@ describe('RpcClient over ORPC Draft1', () => {
     expect(second.text).toBe(first.text);
     socket.message({ id: second.id, result: 'delivered' });
     await expect(pending).resolves.toBe('delivered');
-    client.close();
+    await closeClient(client);
   });
 
   test('rejects once both attempts time out without a response', async () => {
@@ -170,7 +188,7 @@ describe('RpcClient over ORPC Draft1', () => {
     await expect(client.request('chat:send', {})).rejects.toThrow('Incomplete delivery: recovery budget or overall deadline exhausted');
     expect(socket.sent).toHaveLength(2);
     expect(socket.sent[1].id).not.toBe(socket.sent[0].id);
-    client.close();
+    await closeClient(client);
   });
 
   test('retries across a reconnection with a fresh id and the identical envelope', async () => {
@@ -190,7 +208,7 @@ describe('RpcClient over ORPC Draft1', () => {
     expect(second.text).toBe(first.text);
     secondSocket.message({ id: second.id, result: 'recovered' });
     await expect(pending).resolves.toBe('recovered');
-    client.close();
+    await closeClient(client);
   });
 
   test('explicit cancellation rejects without retrying', async () => {
@@ -202,7 +220,7 @@ describe('RpcClient over ORPC Draft1', () => {
     await expect(pending).rejects.toMatchObject({ code: 'CANCELLED' });
     await new Promise((resolve) => setTimeout(resolve, 320));
     expect(socket.sent).toHaveLength(1);
-    client.close();
+    await closeClient(client);
   });
 
   test('an already-aborted signal rejects before sending anything', async () => {
@@ -210,7 +228,7 @@ describe('RpcClient over ORPC Draft1', () => {
     await expect(client.request('chat:send', {}, { signal: AbortSignal.abort('nope') })).rejects.toMatchObject({ code: 'CANCELLED' });
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(socket.sent).toHaveLength(0);
-    client.close();
+    await closeClient(client);
   });
 
   test('terminates the peer and fails pending requests on a malformed frame', async () => {
@@ -225,43 +243,66 @@ describe('RpcClient over ORPC Draft1', () => {
     await until(() => socket.readyState === 3);
     await expect(pending).rejects.toMatchObject({ code: 'PROTOCOL' });
     expect(errors).toHaveLength(1);
-    client.close();
+    await closeClient(client);
   });
 
-  test('processes asynchronously decoded frames in arrival order', async () => {
+  test('withholds server events until the integrity checksum validates', async () => {
     const { client, socket } = await connectClient();
     const notifications = [];
     client.addEventListener('notification', (event) => notifications.push(event.detail.params.sequence));
+    const frames = await eventFrame('conversation.ready', { sequence: 1 }, { eventId: 'evt-1', expiresAt: Date.now() + 60 * SECOND });
+    socket.message(frames.slice(0, -1));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(notifications).toEqual([]);
+    expect(socket.rawSent).toHaveLength(0);
+    socket.message(frames.at(-1));
+    await until(() => notifications.length === 1);
+    expect(notifications).toEqual([1]);
+    await closeClient(client);
+  });
+
+  test('processes asynchronously decoded transfers in arrival order', async () => {
+    const { client, socket } = await connectClient();
+    const notifications = [];
+    client.addEventListener('notification', (event) => notifications.push(event.detail.params.sequence));
+    const first = await eventFrame('conversation.ready', { sequence: 1 }, { eventId: 'evt-1', expiresAt: Date.now() + 60 * SECOND });
+    const second = await eventFrame('conversation.ready', { sequence: 2 }, { eventId: 'evt-2', expiresAt: Date.now() + 60 * SECOND });
     let release;
+    const gate = new Promise((resolve) => { release = resolve; });
     const delayed = new Blob([]);
     delayed.arrayBuffer = async () => {
-      await new Promise((resolve) => { release = resolve; });
-      return eventFrame('conversation.ready', { sequence: 1 }, { eventId: 'evt-1', expiresAt: Date.now() + 60 * SECOND }).buffer;
+      await gate;
+      return first[0];
     };
     socket.message(delayed);
-    socket.message(eventFrame('conversation.ready', { sequence: 2 }, { eventId: 'evt-2', expiresAt: Date.now() + 60 * SECOND }));
+    socket.message(second.slice(0, -1));
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(notifications).toEqual([]);
     release();
     await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(notifications).toEqual([]);
+    socket.message([first[1], second[1]]);
+    await until(() => notifications.length === 2);
     expect(notifications).toEqual([1, 2]);
-    client.close();
+    await closeClient(client);
   });
 
   test('drops a frame that finishes decoding after the socket is closed', async () => {
     const { client, socket } = await connectClient();
     const notifications = [];
     client.addEventListener('notification', (event) => notifications.push(event.detail));
+    const frames = await eventFrame('conversation.ready', { sequence: 1 }, { eventId: 'evt-1', expiresAt: Date.now() + 60 * SECOND });
     let release;
+    const gate = new Promise((resolve) => { release = resolve; });
     const delayed = new Blob([]);
     delayed.arrayBuffer = async () => {
-      await new Promise((resolve) => { release = resolve; });
-      return eventFrame('conversation.ready', { sequence: 1 }, { eventId: 'evt-1', expiresAt: Date.now() + 60 * SECOND }).buffer;
+      await gate;
+      return frames[0];
     };
     socket.message(delayed);
     await new Promise((resolve) => setTimeout(resolve, 10));
-    client.close();
     release();
+    await closeClient(client);
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(notifications).toEqual([]);
   });
@@ -281,6 +322,13 @@ describe('RpcClient over ORPC Draft1', () => {
     firstSocket.close(1006, 'late close');
     secondSocket.message({ id: secondSocket.sent[0].id, result: 'ok' });
     await expect(pending).resolves.toBe('ok');
-    client.close();
+    await closeClient(client);
+  });
+
+  test('close performs the EXIT/BYE handshake before the socket closes', async () => {
+    const { client, socket } = await connectClient();
+    await closeClient(client);
+    expect(socket.readyState).toBe(3);
+    expect(client.peer.closed).toBe(true);
   });
 });
