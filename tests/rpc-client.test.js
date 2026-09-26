@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { RpcClient, RpcError } from '../src/rpc/client.js';
+import { controlFrame } from '../src/rpc/orpc.js';
 import { ORPC_PROTOCOL, FakeSocket, decodeWireFrame, eventFrame, utf8Bytes, until } from './orpc-test-helpers.js';
 
 const SECOND = 1000;
@@ -211,6 +212,58 @@ describe('RpcClient over ORPC Draft 2', () => {
     await closeClient(client);
   });
 
+  test('continues reconnecting after consecutive failed connection attempts until explicitly closed', async () => {
+    const { client, socket } = await connectClient({ reconnect: true });
+    try {
+      client.WebSocketImpl = ManualSocket;
+      socket.close(1006, 'offline');
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const previous = client.socket;
+        await until(() => client.socket !== previous, 4000);
+        client.socket.close(1006, 'still offline');
+        expect(client.closed).toBe(false);
+      }
+      await until(() => ManualSocket.instances.length >= 4, 8000);
+      expect(client.socket.readyState).toBe(0);
+      const pending = client.socket;
+      await closeClient(client);
+      expect(client.reconnectTimer).toBeNull();
+      expect(pending.readyState).toBe(3);
+    } finally { await closeClient(client); }
+  }, 12_000);
+
+  test('reconnects after repeated clean disconnects and restores requests', async () => {
+    const { client, socket: first } = await connectClient({ reconnect: true });
+    for (const code of [1000, 1001]) {
+      const previous = client.socket;
+      previous.close(code, 'connection lost');
+      await until(() => client.socket !== previous, 4000);
+      await until(() => client.socket.readyState === 1);
+      expect(client.closed).toBe(false);
+    }
+    expect(client.socket).not.toBe(first);
+    const request = client.request('rpc:discover', {});
+    await until(() => client.socket.sent.length === 1);
+    client.socket.message({ id: client.socket.sent[0].id, result: 'restored' });
+    await expect(request).resolves.toBe('restored');
+    await closeClient(client);
+  });
+
+  test('recreates the closed ORPC peer after remote shutdown', async () => {
+    const { client, socket } = await connectClient({ reconnect: true });
+    const previousPeer = client.peer;
+    socket.message(controlFrame('REQ', '#EXIT'));
+    await until(() => client.peer.closed && socket.readyState === 3);
+    await until(() => client.socket !== socket, 4000);
+    await until(() => client.socket.readyState === 1);
+    expect(client.peer).not.toBe(previousPeer);
+    const request = client.request('rpc:discover', {});
+    await until(() => client.socket.sent.length === 1);
+    client.socket.message({ id: client.socket.sent[0].id, result: 'restored' });
+    await expect(request).resolves.toBe('restored');
+    await closeClient(client);
+  });
+
   test('explicit cancellation rejects without retrying', async () => {
     const { client, socket } = await connectClient();
     const controller = new AbortController();
@@ -330,5 +383,81 @@ describe('RpcClient over ORPC Draft 2', () => {
     await closeClient(client);
     expect(socket.readyState).toBe(3);
     expect(client.peer.closed).toBe(true);
+  });
+
+  test('connectUntilReady resolves on open without a second connection', async () => {
+    FakeSocket.instances.length = 0;
+    const client = new RpcClient({ url: 'ws://localhost/rpc', apiKey: 'key', reconnect: false, WebSocketImpl: ManualSocket });
+    try {
+      const ready = client.connectUntilReady();
+      ManualSocket.instances.at(-1).open();
+      await expect(ready).resolves.toBe(client);
+      await expect(client.connectUntilReady()).resolves.toBe(client);
+      expect(ManualSocket.instances).toHaveLength(1);
+    } finally { await closeClient(client); }
+  });
+
+  test('connectUntilReady with a small timeout rejects but leaves auto reconnect active', async () => {
+    FakeSocket.instances.length = 0;
+    const client = new RpcClient({ url: 'ws://localhost/rpc', apiKey: 'key', reconnect: true, WebSocketImpl: ManualSocket });
+    try {
+      await expect(client.connectUntilReady({ timeoutMs: 30 })).rejects.toMatchObject({ code: 'INCOMPLETE' });
+      expect(client.closed).toBe(false);
+      client.socket.close(1006, 'still offline');
+      expect(client.reconnectTimer).not.toBeNull();
+      await until(() => ManualSocket.instances.length >= 2, 4000);
+      expect(client.closed).toBe(false);
+    } finally { await closeClient(client); }
+  }, 10_000);
+
+  test('connectUntilReady rejects CANCELLED on explicit close and schedules nothing', async () => {
+    FakeSocket.instances.length = 0;
+    const client = new RpcClient({ url: 'ws://localhost/rpc', apiKey: 'key', reconnect: true, WebSocketImpl: ManualSocket });
+    try {
+      const ready = client.connectUntilReady();
+      const pending = ready.catch((error) => error);
+      await closeClient(client);
+      await expect(pending).resolves.toMatchObject({ code: 'CANCELLED' });
+      expect(client.disposed).toBe(true);
+      expect(client.reconnectTimer).toBeNull();
+    } finally { await closeClient(client); }
+  });
+
+  test('connectUntilReady rejects when WebSocket is unavailable', async () => {
+    const client = new RpcClient({ url: 'ws://localhost/rpc', apiKey: 'key', reconnect: false, WebSocketImpl: null });
+    await expect(client.connectUntilReady()).rejects.toThrow('WebSocket is unavailable');
+  });
+
+  test('manual connect after terminal 4003 recreates the peer and requests succeed', async () => {
+    const { client, socket } = await connectClient({ reconnect: false });
+    const previousPeer = client.peer;
+    socket.close(4003, 'forbidden');
+    expect(client.closed).toBe(true);
+    expect(previousPeer.closed).toBe(true);
+    expect(client.reconnectTimer).toBeNull();
+    await client.connect();
+    const revived = FakeSocket.instances.at(-1);
+    expect(revived).not.toBe(socket);
+    expect(client.peer).not.toBe(previousPeer);
+    const pending = client.request('rpc:discover', {});
+    await until(() => revived.sent.length === 1);
+    revived.message({ id: revived.sent[0].id, result: { apiVersion: 1 } });
+    await expect(pending).resolves.toEqual({ apiVersion: 1 });
+    await closeClient(client);
+  });
+
+  test('one transient failure sets no problem but three consolidate status.problem', async () => {
+    const { client, socket } = await connectClient({ reconnect: false });
+    try {
+      socket.close(1006, 'transient');
+      expect(client.failures).toBe(1);
+      expect(client.status.status).toBe('offline');
+      expect(client.status.problem).toBe(false);
+      client.handleClose(Object.assign(new Event('close'), { code: 1006, reason: 'transient' }));
+      expect(client.status.problem).toBe(false);
+      client.handleClose(Object.assign(new Event('close'), { code: 1006, reason: 'transient' }));
+      expect(client.failures).toBe(3);
+      expect(client.status.problem).toBe(true);
+    } finally { await closeClient(client); }
   });
 });

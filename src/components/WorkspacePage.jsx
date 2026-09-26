@@ -1,9 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { Composer } from './Composer.jsx';
-import { NotesPanel } from './NotesPanel.jsx';
 import { ConversationSidebar } from './ConversationSidebar.jsx';
 import { RichMessage } from './RichMessage.jsx';
-import { METHODS, HISTORY_PAGE_SIZE, supportsMethod, validateDiscovery } from '../rpc/contracts.js';
+import { METHODS, HISTORY_PAGE_SIZE, normalizeModelsResult, supportsMethod, validateDiscovery } from '../rpc/contracts.js';
 import { createOlderHistoryRequest, normalizeMessagePage } from '../rpc/pagination.js';
 import { applyConversationEvent, prependOlderMessages, recoverConversationState, refreshConversationProjection } from '../state/conversation.js';
 import { conversationCreateParams } from '../lib/conversation-folders.js';
@@ -50,8 +49,8 @@ function Question({ item, client, onDone, onError, discovery }) {
   return <form class="attention-card question" onSubmit={submit}><header><i class="ri-questionnaire-line" /><strong>Input required</strong></header>{item.questions.map((question, index) => <fieldset key={question.question}><legend id={`${item.questionId}-question-${index}`}>{question.question}</legend>{question.type === 'free_text' ? <input type="text" aria-labelledby={`${item.questionId}-question-${index}`} required disabled={busy} value={answers[index]} onInput={(event) => setAnswers((currentAnswers) => currentAnswers.map((value, current) => current === index ? event.currentTarget.value : value))} /> : question.options.map((option) => <label key={option}><input required={question.type === 'single_choice'} disabled={busy} type={question.type === 'multiple_choice' ? 'checkbox' : 'radio'} name={`${item.questionId}-${index}`} checked={question.type === 'multiple_choice' ? answers[index].includes(option) : answers[index] === option} onChange={(event) => setAnswers((currentAnswers) => currentAnswers.map((value, current) => current !== index ? value : question.type === 'multiple_choice' ? event.currentTarget.checked ? [...value, option] : value.filter((item) => item !== option) : option))} />{option}</label>)}</fieldset>)}{!supportsMethod(discovery, METHODS.answerQuestion) && <p>Remote answers are unavailable on this Avi instance.</p>}<footer><button type="button" disabled={busy || !supportsMethod(discovery, METHODS.answerQuestion)} onClick={cancel}>Cancel</button><button type="submit" class="primary" disabled={busy || !supportsMethod(discovery, METHODS.answerQuestion) || item.questions.some((question, index) => question.type === 'multiple_choice' ? answers[index].length === 0 : !answers[index].trim())}>Submit answers</button></footer></form>;
 }
 
-function AuxiliaryPanel({ tab, state, client, discovery, globalClient, globalDiscovery, modal, panelRef, onOpenConversation, onClose, onTab, onApprovalDone, onQuestionDone, onQueueOrder, onSemaphoreDone }) {
-  const tabs = [['tasks', 'Tasks'], ['notes', 'Notes'], ['agents', 'Agents'], ['side', 'Side chats'], ['permissions', 'Attention']];
+function AuxiliaryPanel({ tab, state, client, discovery, modal, panelRef, onOpenConversation, onClose, onTab, onApprovalDone, onQuestionDone, onQueueOrder, onSemaphoreDone }) {
+  const tabs = [['tasks', 'Tasks'], ['agents', 'Agents'], ['side', 'Side chats'], ['permissions', 'Attention']];
   const tabRefs = useRef([]);
   const submitting = useRef(false);
   const [busy, setBusy] = useState(false);
@@ -83,7 +82,6 @@ function AuxiliaryPanel({ tab, state, client, discovery, globalClient, globalDis
   }
   return <aside ref={panelRef} class="auxiliary-panel" role={modal ? 'dialog' : undefined} aria-modal={modal || undefined} aria-label={modal ? 'Auxiliary panel' : undefined}><header><div role="tablist" aria-label="Auxiliary panels">{tabs.map(([id, label], index) => <button id={`aux-tab-${id}`} ref={(element) => { tabRefs.current[index] = element; }} role="tab" tabindex={tab === id ? 0 : -1} aria-selected={tab === id} aria-controls="aux-panel-content" onKeyDown={(event) => moveTab(event, index)} onClick={() => onTab(id)}>{label}{id === 'permissions' && state.approvals.length + state.questions.length > 0 && <b>{state.approvals.length + state.questions.length}</b>}</button>)}</div><button class="close-panel" aria-label="Close panel" onClick={onClose}><i class="ri-close-line" /></button></header><div id="aux-panel-content" class="aux-content" role="tabpanel" aria-labelledby={`aux-tab-${tab}`}>
     {actionError && <p class="inline-error" role="alert">{actionError}</p>}
-    {tab === 'notes' && <NotesPanel key={state.conversation?.projectPath ?? 'global'} client={globalClient} discovery={globalDiscovery} folderPath={state.conversation?.projectPath ?? null} />}
     {tab === 'tasks' && <>{state.semaphoreWaits.length > 0 && <section class="semaphore-list"><h2>Waiting for capacity</h2>{state.semaphoreWaits.map((wait) => <div><span><strong>{wait.name}</strong><small>{wait.blocked ? wait.summary || 'Blocked' : 'Queued for a permit'}</small></span><button disabled={busy || !supportsMethod(discovery, METHODS.runSemaphoreNow)} onClick={() => performAction(METHODS.runSemaphoreNow, undefined, onSemaphoreDone)}>Run now</button><button disabled={busy || !supportsMethod(discovery, METHODS.cancelSemaphore)} onClick={() => performAction(METHODS.cancelSemaphore, undefined, onSemaphoreDone)}>Cancel wait</button></div>)}</section>}{state.queue.steer.length > 0 && <section class="queue-list"><h2>Steering prompts</h2>{state.queue.steer.map((message, index) => <div><span>{message.content || 'Steering message'}</span><button aria-label={`Move ${message.content || 'message'} up`} disabled={busy || index === 0 || !supportsMethod(discovery, METHODS.reorderQueued)} onClick={() => reorderQueue(state.queue.steer, 'steer', index, -1)}><i class="ri-arrow-up-line" /></button><button aria-label={`Move ${message.content || 'message'} down`} disabled={busy || index === state.queue.steer.length - 1 || !supportsMethod(discovery, METHODS.reorderQueued)} onClick={() => reorderQueue(state.queue.steer, 'steer', index, 1)}><i class="ri-arrow-down-line" /></button><button disabled={busy || !supportsMethod(discovery, METHODS.cancelQueued)} onClick={() => performAction(METHODS.cancelQueued, { messageId: message.id }, onQueueOrder)}>Cancel</button></div>)}</section>}{state.tasks.length ? <ol class="task-list">{state.tasks.map((task) => <li class={task.done ? 'done' : ''}><i class={task.done ? 'ri-checkbox-circle-line' : 'ri-checkbox-blank-circle-line'} /><div><strong>{task.title}</strong><p>{task.description}</p>{task.result && <small>{task.result}</small>}</div></li>)}</ol> : <p class="panel-empty">No tasks in this thread.</p>}</>}
     {tab === 'agents' && (state.subagents.length || state.rubberDucks.length ? <ul class="thread-list compact">{state.subagents.map((item) => <li><button onClick={() => onOpenConversation(item.id)}><i class="ri-git-branch-line" /><span><strong>{item.title}</strong><small>{item.workStatus ?? 'Sub-agent'}</small></span></button></li>)}{state.rubberDucks.map((item) => <li><button onClick={() => onOpenConversation(item.id)}><i class="ri-chat-smile-2-line" /><span><strong>{item.title}</strong><small>Rubber Duck</small></span></button></li>)}</ul> : <p class="panel-empty">No sub-agents or Rubber Ducks have been created.</p>)}
     {tab === 'side' && (state.sideChats.length ? <ul class="thread-list compact">{state.sideChats.map((item) => <li><button onClick={() => onOpenConversation(item.id)}><i class="ri-chat-1-line" /><span><strong>{item.title}</strong><small>Side chat</small></span></button></li>)}</ul> : <p class="panel-empty">No side chats for this thread.</p>)}
@@ -91,7 +89,7 @@ function AuxiliaryPanel({ tab, state, client, discovery, globalClient, globalDis
   </div></aside>;
 }
 
-export function WorkspacePage({ connection, globalClient, discovery, models, intelligenceLevels, messageDeliveryMode, conversations, folders, bots, tags, sidebarStatus, schedulerSnooze, onRefresh, onExit, connections = [], onSwitchConnection, connectionStatus, refreshError, switchingConnectionId, workspaceMemory }) {
+export function WorkspacePage({ connection, globalClient, discovery, models, lastModel, intelligenceLevels, messageDeliveryMode, conversations, folders, bots, tags, sidebarStatus, schedulerSnooze, onRefresh, onReconnect, onExit, connections = [], onSwitchConnection, connectionStatus, refreshError, switchingConnectionId, workspaceMemory }) {
   const localMemory = useRef(new Map());
   const memory = workspaceMemory ?? localMemory.current;
   if (!memory.has(connection.id)) memory.set(connection.id, { selectedId: null, drafts: new Map() });
@@ -103,6 +101,9 @@ export function WorkspacePage({ connection, globalClient, discovery, models, int
   const [state, setState] = useState(recoverConversationState({}));
   const [client, setClient] = useState(null);
   const [conversationDiscovery, setConversationDiscovery] = useState(null);
+  const [conversationConnectionProblem, setConversationConnectionProblem] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const recoverRef = useRef(null);
   const [history, setHistory] = useState({ hasMore: false, nextCursor: null });
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [mobile, setMobile] = useState(() => window.matchMedia?.('(max-width: 860px)').matches ?? false);
@@ -190,6 +191,8 @@ export function WorkspacePage({ connection, globalClient, discovery, models, int
     setState(emptyState);
     const socket = new RpcClient({ url: connection.relay ? undefined : toWebSocketUrl(connection.serverUrl, conversationSocketPath(selectedId)), relay: connection.relay, path: conversationSocketPath(selectedId), apiKey: connection.apiKey });
     setConversationDiscovery(null);
+    setConversationConnectionProblem(false);
+    let refreshFailures = 0;
     let active = true;
     let recovering = false;
     let recoveryAttempt = 0;
@@ -221,6 +224,8 @@ export function WorkspacePage({ connection, globalClient, discovery, models, int
         if (!recoveredOnce) setHistory(normalizeMessagePage(context.messagePage ?? { messages: context.messages, hasMore: false }));
         recoveredOnce = true;
         recoveryAttempt = 0;
+        refreshFailures = 0;
+        setConversationConnectionProblem(false);
       } catch (value) {
         if (active) {
           const recovered = bufferedEvents.reduce(
@@ -229,14 +234,14 @@ export function WorkspacePage({ connection, globalClient, discovery, models, int
           );
           stateRef.current = recovered;
           setState(recovered);
-          setError(value.message);
+          if (++refreshFailures >= 3) setConversationConnectionProblem(true);
           const delay = Math.min(1_000 * (2 ** recoveryAttempt++), 15_000);
           if (!socket.closed) recoveryTimer = setTimeout(recover, delay);
         }
       } finally { recovering = false; }
     }
     async function refreshProjection() {
-      if (!active || recovering || projectionRefreshing || socket.closed) return;
+      if (!active || recovering || projectionRefreshing || socket.closed || socket.status.status !== 'online') return;
       projectionRefreshing = true;
       try {
         const context = await socket.request(METHODS.conversationContext, { limit: 1 });
@@ -244,8 +249,10 @@ export function WorkspacePage({ connection, globalClient, discovery, models, int
         const next = refreshConversationProjection(stateRef.current, context);
         stateRef.current = next;
         setState(next);
-      } catch (value) {
-        if (active && !socket.closed) setError(value.message);
+        refreshFailures = 0;
+        setConversationConnectionProblem(false);
+      } catch {
+        if (active && ++refreshFailures >= 3) setConversationConnectionProblem(true);
       } finally { projectionRefreshing = false; }
     }
     socket.addEventListener('notification', (event) => {
@@ -264,15 +271,29 @@ export function WorkspacePage({ connection, globalClient, discovery, models, int
     });
     socket.addEventListener('status', (event) => {
       if (!active) return;
-      if (event.detail.status !== 'online') { setConversationDiscovery(null); setError(event.detail.error || 'Conversation connection is offline. Reconnecting...'); }
-      else {
-        setError('');
+      setConversationConnectionProblem(event.detail.problem);
+      if (event.detail.status === 'online') {
         if (!projectionTimer) projectionTimer = setInterval(refreshProjection, 5_000);
       }
     });
-    socket.connect().catch((value) => { if (active) setError(value.message); });
+    recoverRef.current = recover;
+    const resume = () => {
+      if (document.visibilityState !== 'hidden' && !socket.closed) socket.connectUntilReady().then(recover).catch(() => {});
+    };
+    window.addEventListener('online', resume);
+    document.addEventListener('visibilitychange', resume);
+    socket.connectUntilReady().catch(() => {});
     setClient(socket);
-    return () => { active = false; clearTimeout(recoveryTimer); clearInterval(projectionTimer); socket.close(); setClient(null); };
+    return () => {
+      active = false;
+      recoverRef.current = null;
+      clearTimeout(recoveryTimer);
+      clearInterval(projectionTimer);
+      window.removeEventListener('online', resume);
+      document.removeEventListener('visibilitychange', resume);
+      socket.close();
+      setClient(null);
+    };
   }, [selectedId, connection.id]);
 
   useLayoutEffect(() => {
@@ -336,7 +357,9 @@ export function WorkspacePage({ connection, globalClient, discovery, models, int
   async function createConversation(folder) {
     if (!supportsMethod(discovery, METHODS.createConversation)) return;
     try {
-      const item = await globalClient.request(METHODS.createConversation, conversationCreateParams(folder, models[0]?.id));
+      const catalog = normalizeModelsResult(await globalClient.request(METHODS.models));
+      const defaultModel = [catalog.lastModel, catalog.models[0]?.id].find((id) => catalog.models.some((model) => model.id === id));
+      const item = await globalClient.request(METHODS.createConversation, conversationCreateParams(folder, defaultModel));
       await onRefresh(item);
       selectConversation(item.id);
     } catch (value) { setError(value.message); }
@@ -441,7 +464,17 @@ export function WorkspacePage({ connection, globalClient, discovery, models, int
         <div class="workspace-heading"><strong title={conversationTitle}>{conversationTitle}</strong><small title={conversationFolder}>{conversationFolder}</small></div>
         <button ref={panelButtonRef} aria-label={panelOpen ? 'Close auxiliary panel' : 'Open auxiliary panel'} aria-haspopup={mobile ? 'dialog' : undefined} aria-expanded={panelOpen} onClick={() => { setPanelOpen(!panelOpen); if (attentionCount) setPanelTab('permissions'); }}><i class="ri-layout-right-line" />{attentionCount > 0 && <b>{attentionCount}</b>}</button>
       </header>
-      {(refreshError || (connectionStatus && connectionStatus.status !== 'online')) && <div class="workspace-connection-alert" role="alert"><span>{refreshError || connectionStatus.error || connectionStatus.detail || 'Connection interrupted. Reconnecting; displayed data may be out of date.'}</span><button onClick={() => onRefresh().catch((value) => setError(value.message))}>Retry</button></div>}
+      {(refreshError || connectionStatus?.problem || conversationConnectionProblem) && <div class="workspace-connection-alert" role="status"><span>We are having connection problems. Your work is still here. {globalClient?.closed || client?.closed ? 'Retry the connection; check your sign-in or server settings if it keeps failing.' : 'Reconnecting automatically...'}</span><button disabled={retrying} onClick={async () => {
+        setRetrying(true);
+        try {
+          await Promise.all([
+            (onReconnect ?? onRefresh)(),
+            client?.connectUntilReady({ timeoutMs: 15_000 }).then(() => recoverRef.current?.()),
+          ]);
+        } catch {
+          setConversationConnectionProblem(true);
+        } finally { setRetrying(false); }
+      }}>{retrying ? 'Reconnecting...' : 'Retry'}</button></div>}
       {(error || state.error) && <div class="workspace-connection-alert" role="alert"><span>{error || state.error}</span><button onClick={() => {
         setError('');
         const next = { ...stateRef.current, error: null };
@@ -458,16 +491,16 @@ export function WorkspacePage({ connection, globalClient, discovery, models, int
         if (!result?.conversation?.id) throw new Error('Avi could not fork this conversation.');
       } : undefined} />)}</div> : <div class="empty-chat"><span class="avi-mark large"><img src="avi.png" alt="" width="34" height="34" /></span><h1>{conversationTitle}</h1><p>Remote state stays authoritative on {connection.label}.</p></div>}</div>
       {awayFromBottom && <button type="button" class="scroll-to-bottom" aria-label="Scroll to latest message" title="Scroll to latest message" onClick={() => scrollToBottom('smooth')}><i class="ri-arrow-down-line" /></button>}
-      {client && state.conversation && <Composer key={state.conversation.id} globalClient={globalClient} globalDiscovery={discovery} onNoteCreated={() => { setPanelTab('notes'); setPanelOpen(true); }} client={client} state={state} discovery={conversationDiscovery} draftCache={savedWorkspace.drafts} models={models} intelligenceLevels={intelligenceLevels} messageDeliveryMode={messageDeliveryMode} compact={mobile && mobileComposerCompact} onExpand={() => {
+      {client && state.conversation && <Composer key={state.conversation.id} client={client} state={state} discovery={conversationDiscovery} draftCache={savedWorkspace.drafts} models={models} lastModel={lastModel} intelligenceLevels={intelligenceLevels} messageDeliveryMode={messageDeliveryMode} compact={mobile && mobileComposerCompact} onExpand={() => {
         setMobileComposerCompact(false);
         requestAnimationFrame(() => composerWrapRef.current?.querySelector('textarea')?.focus());
-      }} onSent={onRefresh} onStop={() => client.request(METHODS.stop)} onSideChat={createSideChat} onOpenTasks={() => { setPanelTab('tasks'); setPanelOpen(true); }} onOpenAgents={() => { setPanelTab('agents'); setPanelOpen(true); }} onQueueOrder={applyQueueResult} onError={(value) => setError(value.message)} composerRef={composerWrapRef} />}
+      }} onSent={() => onRefresh().catch(() => {})} onStop={() => client.request(METHODS.stop)} onSideChat={createSideChat} onOpenTasks={() => { setPanelTab('tasks'); setPanelOpen(true); }} onOpenAgents={() => { setPanelTab('agents'); setPanelOpen(true); }} onQueueOrder={applyQueueResult} onError={(value) => setError(value.message)} composerRef={composerWrapRef} />}
     </section>
     {mobile && navigationOpen && <div ref={navigationDialogRef} class="mobile-navigation-layer">
       <div class="mobile-drawer" role="dialog" aria-modal="true" aria-label="Navigation"><ConversationSidebar {...sidebarProps} collapsed={false} onClose={closeNavigation} /></div>
       <div class="mobile-overlay-backdrop" aria-hidden="true" onClick={closeNavigation} />
     </div>}
-    {panelOpen && <AuxiliaryPanel key={selectedId} globalClient={globalClient} globalDiscovery={discovery} discovery={conversationDiscovery} modal={mobile} panelRef={panelDialogRef} tab={panelTab} state={state} client={client} onOpenConversation={selectConversation} onClose={closePanel} onTab={setPanelTab} onApprovalDone={(approvalId) => { if (client.closed || selectedIdRef.current !== selectedId) return; const next = { ...stateRef.current, approvals: stateRef.current.approvals.filter((item) => item.approvalId !== approvalId) }; stateRef.current = next; setState(next); }} onQuestionDone={(questionId) => { if (client.closed || selectedIdRef.current !== selectedId) return; const next = { ...stateRef.current, questions: stateRef.current.questions.filter((item) => item.questionId !== questionId) }; stateRef.current = next; setState(next); }} onQueueOrder={applyQueueResult} onSemaphoreDone={() => { if (client.closed || selectedIdRef.current !== selectedId) return; const next = { ...stateRef.current, semaphoreWaits: [] }; stateRef.current = next; setState(next); }} />}
+    {panelOpen && <AuxiliaryPanel key={selectedId} discovery={conversationDiscovery} modal={mobile} panelRef={panelDialogRef} tab={panelTab} state={state} client={client} onOpenConversation={selectConversation} onClose={closePanel} onTab={setPanelTab} onApprovalDone={(approvalId) => { if (client.closed || selectedIdRef.current !== selectedId) return; const next = { ...stateRef.current, approvals: stateRef.current.approvals.filter((item) => item.approvalId !== approvalId) }; stateRef.current = next; setState(next); }} onQuestionDone={(questionId) => { if (client.closed || selectedIdRef.current !== selectedId) return; const next = { ...stateRef.current, questions: stateRef.current.questions.filter((item) => item.questionId !== questionId) }; stateRef.current = next; setState(next); }} onQueueOrder={applyQueueResult} onSemaphoreDone={() => { if (client.closed || selectedIdRef.current !== selectedId) return; const next = { ...stateRef.current, semaphoreWaits: [] }; stateRef.current = next; setState(next); }} />}
     <div class="version-bar">Avi {discovery.appVersion}{discovery.versions?.core != null && ` · Core v${discovery.versions.core}`}{discovery.versions?.mcp?.latest != null && ` · MCP ${discovery.versions.mcp.latest}`} · RPC v{discovery.apiVersion}</div>
   </main>;
 }

@@ -101,7 +101,7 @@ export class RelaySocket extends EventTarget {
           forwarded.data = event.data;
           this.dispatchEvent(forwarded);
         });
-        socket.addEventListener('close', (event) => this.finish(event.code, `Relay connection closed (${event.code}).`, [1006, 1011, 1012, 1013, 4001].includes(event.code)));
+        socket.addEventListener('close', (event) => this.finish(event.code, `Relay connection closed (${event.code}).`, ![1002, 1003, 1007, 1008, 1009, 4003].includes(event.code)));
         socket.addEventListener('error', () => this.finish(1006, 'Relay connection failed.', true));
       } catch (error) {
         if (this.readyState !== 3) this.finish(error instanceof SyntaxError || error instanceof URIError ? 1008 : 1006, 'Could not establish the relay connection.', !(error instanceof SyntaxError || error instanceof URIError));
@@ -142,7 +142,7 @@ export class RelaySocket extends EventTarget {
     this.dispatchEvent(event);
   }
 
-  close() {
-    this.finish(1000, 'Client closed', false);
+  close(code = 1000, reason = 'Client closed', retryable = false) {
+    this.finish(code, reason, retryable);
   }
 }

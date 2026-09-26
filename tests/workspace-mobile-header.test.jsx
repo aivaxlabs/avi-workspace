@@ -159,7 +159,7 @@ describe('workspace mobile shell', () => {
     act(() => render(h(WorkspacePage, {
       connection: first, connections: [first, second], workspaceMemory: memory,
       onSwitchConnection: (item) => switches.push(item),
-      connectionStatus: { status: 'offline', error: 'Network disconnected' },
+      connectionStatus: { status: 'offline', error: 'Network disconnected', problem: true },
       globalClient: { request: () => Promise.resolve() },
       discovery: { appVersion: 'test', apiVersion: 1, versions: { core: 2, mcp: { latest: 1 } }, methods: [] },
       models: [], conversations: [{ id: 'thread-1', title: 'First' }, { id: 'thread-2', title: 'Second' }], folders: [],
@@ -167,7 +167,8 @@ describe('workspace mobile shell', () => {
     }), root));
     const selector = root.querySelector('[aria-label="Active Avi instance"]');
     expect(selector.value).toBe('first');
-    expect(root.querySelector('.workspace-connection-alert').textContent).toContain('Network disconnected');
+    expect(root.querySelector('.workspace-connection-alert').textContent).toContain('connection problems');
+    expect(root.querySelector('.workspace-connection-alert').textContent).not.toContain('Network disconnected');
     expect(root.querySelector('.thread-list li.active .thread-open').textContent).toContain('Second');
     expect(root.querySelector('.auxiliary-panel')).toBeNull();
     act(() => { selector.value = 'second'; selector.dispatchEvent(new window.Event('change', { bubbles: true })); });

@@ -27,7 +27,18 @@ export class RpcClient extends EventTarget {
     this.socket = null;
     this.events = new Map();
     this.metrics = { sentBytes: 0, receivedBytes: 0, completed: 0, failed: 0, cancelled: 0, latencyMs: null, latencyMinMs: null, latencyMaxMs: null, latencyTotalMs: 0, lastResponseAt: null, connectedAt: null, reconnects: 0 };
-    this.peer = new OrpcPeer({
+    this.peer = this.createPeer();
+    this.closed = false;
+    this.disposed = false;
+    this.reconnectAttempt = 0;
+    this.reconnectTimer = null;
+    this.problemTimer = null;
+    this.failures = 0;
+    this.status = { status: 'offline', error: null, problem: false };
+  }
+
+  createPeer() {
+    return new OrpcPeer({
       integrity: true,
       send: (frame) => {
         this.socket.send(frame);
@@ -40,8 +51,7 @@ export class RpcClient extends EventTarget {
         this.socket?.close(error.code === 'LIMIT' ? 1009 : 1002, error.code);
       },
       onClose: () => {
-        this.closed = true;
-        this.socket?.close(1000, 'ORPC shutdown');
+        this.socket?.close(1000, 'ORPC shutdown', !this.closed);
       },
       onRequest: (method, bytes) => {
         if (this.closed) return new Uint8Array();
@@ -60,9 +70,6 @@ export class RpcClient extends EventTarget {
         return new TextEncoder().encode('OK');
       },
     });
-    this.closed = false;
-    this.reconnectAttempt = 0;
-    this.reconnectTimer = null;
   }
 
   connect() {
@@ -70,6 +77,8 @@ export class RpcClient extends EventTarget {
     if (this.socket?.readyState === this.WebSocketImpl.OPEN) return Promise.resolve(this);
     if (this.connectPromise) return this.connectPromise;
     this.closed = false;
+    this.disposed = false;
+    if (this.peer.closed) this.peer = this.createPeer();
     clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
     this.dispatchStatus('checking');
@@ -79,7 +88,12 @@ export class RpcClient extends EventTarget {
         : new this.WebSocketImpl(this.url, this.protocols);
       this.socket = socket;
       let opened = false;
+      const openingTimer = setTimeout(() => {
+        rejectInitial(new Error('Connection attempt timed out.'));
+        socket.close(1000, 'Connection attempt timed out', true);
+      }, 15_000);
       const cleanupInitial = () => {
+        clearTimeout(openingTimer);
         socket.removeEventListener('open', onOpen);
         socket.removeEventListener('error', onInitialError);
         socket.removeEventListener('close', onInitialClose);
@@ -100,8 +114,11 @@ export class RpcClient extends EventTarget {
         if (this.metrics.connectedAt !== null) this.metrics.reconnects++;
         this.metrics.connectedAt = Date.now();
         cleanupInitial();
-        if (this.relay) this.stableTimer = setTimeout(() => { if (this.socket === socket) this.reconnectAttempt = 0; }, 30_000);
-        else this.reconnectAttempt = 0;
+        clearTimeout(this.problemTimer);
+        this.problemTimer = null;
+        this.stableTimer = setTimeout(() => {
+          if (this.socket === socket) { this.reconnectAttempt = 0; this.failures = 0; }
+        }, 30_000);
         this.dispatchStatus('online');
         this.dispatchEvent(new CustomEvent('open'));
         resolve(this);
@@ -121,6 +138,34 @@ export class RpcClient extends EventTarget {
       socket.addEventListener('error', () => this.dispatchEvent(new CustomEvent('transport-error')));
     }).finally(() => { this.connectPromise = null; });
     return this.connectPromise;
+  }
+
+  connectUntilReady({ timeoutMs = 0 } = {}) {
+    if (!this.WebSocketImpl) return Promise.reject(new Error('WebSocket is unavailable in this browser.'));
+    if (this.socket?.readyState === this.WebSocketImpl.OPEN) return Promise.resolve(this);
+    return new Promise((resolve, reject) => {
+      const timer = timeoutMs > 0 ? setTimeout(() => {
+        this.removeEventListener('status', status);
+        reject(new OrpcError('Connection is still recovering', 'INCOMPLETE'));
+      }, timeoutMs) : null;
+      const status = () => {
+        if (this.status.status !== 'online' && !this.closed) return;
+        clearTimeout(timer);
+        this.removeEventListener('status', status);
+        if (this.closed) reject(new OrpcError(this.status.error || 'Connection closed', 'CANCELLED'));
+        else resolve(this);
+      };
+      this.addEventListener('status', status);
+      this.connect().catch((error) => {
+        if (!this.closed && this.reconnect) {
+          this.scheduleReconnect();
+          return;
+        }
+        clearTimeout(timer);
+        this.removeEventListener('status', status);
+        reject(error);
+      });
+    });
   }
 
   async request(method, params, { timeoutMs = this.timeoutMs, signal } = {}) {
@@ -158,14 +203,19 @@ export class RpcClient extends EventTarget {
   }
 
   handleClose(event, source = this.socket) {
-    if (this.socket !== source) return;
+    if (this.socket !== source || this.disposed) return;
     clearTimeout(this.stableTimer);
+    this.failures++;
     if (this.relay && event.retryable === false) this.closed = true;
     if ([1002, 1008, 1009, 4003].includes(event.code) || event.retryable === false) {
       this.closed = true;
       this.peer.terminate(new OrpcError(event.reason || 'Channel rejected', event.code === 1009 ? 'LIMIT' : 'PROTOCOL'));
     } else this.peer.channelFailed();
     this.dispatchStatus('offline', event.reason || `Connection closed (${event.code}).`);
+    if (!this.problemTimer && event.reason !== 'Client closed' && event.reason !== 'ORPC shutdown') this.problemTimer = setTimeout(() => {
+      this.problemTimer = null;
+      if (this.status.status !== 'online') this.dispatchStatus(this.status.status, this.status.error, true);
+    }, 15_000);
     this.dispatchEvent(new CustomEvent('close', { detail: event }));
     if (!this.closed && this.reconnect) this.scheduleReconnect();
   }
@@ -174,23 +224,28 @@ export class RpcClient extends EventTarget {
     if (this.closed || this.reconnectTimer) return;
     const delay = this.relay
       ? Math.min(1_000 * (2 ** Math.min(this.reconnectAttempt++, 5)), 30_000) * (0.75 + Math.random() * 0.25)
-      : Math.min(1_000 * (2 ** this.reconnectAttempt++), 15_000);
+      : Math.min(1_000 * (2 ** Math.min(this.reconnectAttempt++, 4)), 15_000);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       if (!this.closed) this.connect().catch(() => this.scheduleReconnect());
     }, delay);
   }
 
-  dispatchStatus(status, error = null) {
-    this.dispatchEvent(new CustomEvent('status', { detail: { status, error } }));
+  dispatchStatus(status, error = null, problem = this.status.problem || this.failures >= 3) {
+    this.status = { status, error, problem: status !== 'online' && problem };
+    this.dispatchEvent(new CustomEvent('status', { detail: this.status }));
   }
 
   close() {
+    this.disposed = true;
     this.closed = true;
     clearTimeout(this.stableTimer);
+    clearTimeout(this.problemTimer);
+    this.problemTimer = null;
     clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
     this.events.clear();
+    this.dispatchStatus('offline', 'Connection closed', false);
     const socket = this.socket;
     if (socket?.readyState === this.WebSocketImpl.OPEN) {
       return this.peer.shutdown().catch((error) => {

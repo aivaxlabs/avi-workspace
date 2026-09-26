@@ -25,7 +25,7 @@ async function loadWorkspaceState(client, discovery, includeModels = false) {
       runningConversationIds: [], approvalPendingConversationIds: [], inputPendingConversationIds: [],
       semaphoreWaitingConversationIds: [], completedUnseenConversationIds: [],
     },
-    ...(modelCatalog ? { models: modelCatalog.models, intelligenceLevels: modelCatalog.defaultModels?.intelligence?.levels ?? [], messageDeliveryMode: modelCatalog.messageDeliveryMode } : {}),
+    ...(modelCatalog ? { models: modelCatalog.models, lastModel: modelCatalog.lastModel, intelligenceLevels: modelCatalog.defaultModels?.intelligence?.levels ?? [], messageDeliveryMode: modelCatalog.messageDeliveryMode } : {}),
   };
 }
 
@@ -100,6 +100,7 @@ export function App() {
       return;
     }
     const pending = (async () => {
+      if (current.client.closed || current.client.status.status !== 'online') return;
       const needsDiscovery = current.needsDiscovery;
       const discovery = needsDiscovery ? validateDiscovery(await current.client.request(METHODS.discover)) : current.discovery;
       const data = await loadWorkspaceState(current.client, discovery, needsDiscovery);
@@ -108,11 +109,15 @@ export function App() {
       for (const id of listed) current.pendingConversations.delete(id);
       Object.assign(current, data, { discovery, needsDiscovery: false, conversations: [...current.pendingConversations.values(), ...data.conversations] });
       setSession({ ...current });
+      current.refreshFailures = 0;
       setRefreshError('');
     })();
     current.refreshing = pending;
     try { await pending; }
-    catch (error) { if (sessionRef.current === current) setRefreshError(`Workspace refresh failed: ${error.message}`); throw error; }
+    catch (error) {
+      if (sessionRef.current === current && ++current.refreshFailures >= 3) setRefreshError('We are having connection problems. Your work is still here.');
+      throw error;
+    }
     finally { if (current.refreshing === pending) current.refreshing = null; }
   }
 
@@ -124,14 +129,27 @@ export function App() {
     pendingClient.current = client;
     setSwitchingConnectionId(connection.id);
     setRefreshError('');
+    client.addEventListener('status', (event) => {
+      if (pendingClient.current === client) setStatuses((current) => ({ ...current, [connection.id]: { ...event.detail, detail: event.detail.problem ? 'We are having connection problems. Retrying...' : 'Connecting...' } }));
+    });
     try {
-      await client.connect();
-      const discovery = validateDiscovery(await client.request(METHODS.discover));
-      const data = await loadWorkspaceState(client, discovery, true);
+      await client.connectUntilReady();
+      let discovery;
+      let data;
+      while (token === attempt.current) {
+        try {
+          discovery = validateDiscovery(await client.request(METHODS.discover));
+          data = await loadWorkspaceState(client, discovery, true);
+          break;
+        } catch (error) {
+          if (client.closed || !['INCOMPLETE', 'CANCELLED'].includes(error.code)) throw error;
+          await client.connectUntilReady();
+        }
+      }
       const saved = await listConnections();
       if (token !== attempt.current) { client.close(); return; }
       const previous = sessionRef.current;
-      const next = { connection, client, discovery, ...data, pendingConversations: new Map(), refreshing: null, needsDiscovery: false, connectionStatus: { status: 'online' } };
+      const next = { connection, client, discovery, ...data, pendingConversations: new Map(), refreshing: null, refreshFailures: 0, needsDiscovery: false, connectionStatus: { status: 'online' } };
       sessionRef.current = next;
       client.addEventListener('status', (event) => {
         if (sessionRef.current !== next) return;
@@ -155,6 +173,30 @@ export function App() {
       if (token === attempt.current) { pendingClient.current = null; setSwitchingConnectionId(null); }
     }
   }
+
+  async function reconnect() {
+    const current = sessionRef.current;
+    if (!current) return;
+    await current.client.connectUntilReady({ timeoutMs: 15_000 });
+    if (sessionRef.current === current) {
+      current.needsDiscovery = true;
+      await refresh();
+    }
+  }
+
+  useEffect(() => {
+    const resume = () => {
+      if (document.visibilityState === 'hidden') return;
+      const current = sessionRef.current;
+      if (current && !current.client.closed) current.client.connectUntilReady().then(() => refresh()).catch(() => {});
+    };
+    window.addEventListener('online', resume);
+    document.addEventListener('visibilitychange', resume);
+    return () => {
+      window.removeEventListener('online', resume);
+      document.removeEventListener('visibilitychange', resume);
+    };
+  }, []);
 
   useEffect(() => {
     if (!session) return;
@@ -186,6 +228,6 @@ export function App() {
   }
 
   return session
-    ? <WorkspacePage key={session.connection.id} {...session} globalClient={session.client} connections={connections} onSwitchConnection={enter} connectionStatus={session.connectionStatus} refreshError={refreshError} switchingConnectionId={switchingConnectionId} workspaceMemory={workspaceMemory.current} onRefresh={refresh} onExit={exit} />
+    ? <WorkspacePage key={session.connection.id} {...session} globalClient={session.client} connections={connections} onSwitchConnection={enter} connectionStatus={session.connectionStatus} refreshError={refreshError} switchingConnectionId={switchingConnectionId} workspaceMemory={workspaceMemory.current} onRefresh={refresh} onReconnect={reconnect} onExit={exit} />
     : <ConnectionsPage statuses={statuses} openingId={switchingConnectionId} onCheck={check} onEnter={enter} onCancelOpen={exit} />;
 }

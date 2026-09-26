@@ -174,6 +174,7 @@ export function ConnectionsPage({ statuses, onEnter, onCheck, onCancelOpen, open
           <p>{status.detail || (status.status === 'online' ? 'RPC API v1 available' : 'Remote instance unavailable')}</p>
           <footer>
             <button class="primary" disabled={(!connection.relay && status.status !== 'online') || openingId !== null} onClick={() => onEnter(connection, [...connections, ...remoteConnections])}>{openingId === connection.id ? 'Opening...' : 'Open workspace'}</button>
+            {openingId === connection.id && <button onClick={() => onCancelOpen?.()}>Cancel</button>}
             {!connection.relay && <><button aria-label={`Check ${connection.label}`} title="Check connection" disabled={status.status === 'checking' || openingId !== null} onClick={() => onCheck(connection)}><i class="ri-refresh-line" /></button>
             <button aria-label={`Edit ${connection.label}`} title="Edit connection" onClick={() => openForm({ ...connection })}><i class="ri-pencil-line" /></button>
             <button class="danger-quiet" aria-label={`Remove ${connection.label}`} title="Remove connection" onClick={() => remove(connection)}><i class="ri-delete-bin-line" /></button></>}
@@ -182,6 +183,7 @@ export function ConnectionsPage({ statuses, onEnter, onCheck, onCancelOpen, open
       })}
       {connections.length === 0 && remoteConnections.length === 0 && <div class="empty-connections"><i class="ri-links-line" /><h2>No remote instances</h2><p>Add an Avi URL and API key, or link your AIVAX account to list its remote instances automatically.</p></div>}
     </section>
+    {import.meta.env.VITE_WORKSPACE_COMMIT && <footer class="connections-revision">{import.meta.env.VITE_WORKSPACE_COMMIT}</footer>}
     {aivaxOpen && <div class="modal-backdrop">
       <form ref={aivaxDialogRef} class="connection-dialog" role="dialog" aria-modal="true" aria-label="Login with AIVAX" onSubmit={async (event) => {
         event.preventDefault();

@@ -46,6 +46,52 @@ test('independent consumers wait for Remote ready and send no credential in the 
   expect(clients[0].readyState).toBe(1);
 });
 
+test('normal remote closure is retryable but explicit client closure is not', async () => {
+  const relay = new RelaySocket({ ...options, fetchImpl: async () => new Response(JSON.stringify(ticket()), { status: 201 }) });
+  clients.push(relay);
+  await flush();
+  const socket = Socket.instances.at(-1);
+  socket.open();
+  socket.message({ type: 'avi-remote-ready', version: 3, protocol: ORPC_PROTOCOL });
+  let closed;
+  relay.addEventListener('close', (event) => { closed = event; });
+  socket.close(1000);
+  expect(closed.retryable).toBe(true);
+
+  const explicit = new RelaySocket({ ...options, fetchImpl: async () => new Response(JSON.stringify(ticket()), { status: 201 }) });
+  clients.push(explicit);
+  explicit.addEventListener('close', (event) => { closed = event; });
+  explicit.close();
+  expect(closed.retryable).toBe(false);
+});
+
+test('relay client reacquires a ticket after a clean remote close', async () => {
+  let tickets = 0;
+  const client = new RpcClient({
+    relay: { deviceId: 'device', accessToken: 'account-secret', fetchImpl: async () => {
+      tickets++;
+      return new Response(JSON.stringify(ticket()), { status: 201 });
+    } },
+    WebSocketImpl: Socket,
+  });
+  clients.push(client);
+  const connecting = client.connect();
+  await flush();
+  const first = Socket.instances.at(-1);
+  first.open();
+  first.message({ type: 'avi-remote-ready', version: 3, protocol: ORPC_PROTOCOL });
+  await connecting;
+  first.close(1000);
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  expect(tickets).toBe(2);
+  const second = Socket.instances.at(-1);
+  second.open();
+  second.message({ type: 'avi-remote-ready', version: 3, protocol: ORPC_PROTOCOL });
+  await flush();
+  expect(client.closed).toBe(false);
+  expect(client.socket.readyState).toBe(1);
+});
+
 test('a legacy or invalid ready frame closes terminally', async () => {
   for (const ready of [{ type: 'avi-remote-ready', version: 1 }, { type: 'avi-remote-ready', version: 3 }, { type: 'avi-remote-ready', version: 3, protocol: 'avi-rpc-v1' }]) {
     const relay = new RelaySocket({ ...options, fetchImpl: async () => new Response(JSON.stringify(ticket()), { status: 201 }) });
@@ -161,4 +207,93 @@ test('forwards binary ORPC frames unchanged after ready', async () => {
   expect(received).toHaveLength(1);
   expect(Buffer.from(received[0]).equals(Buffer.from(frame))).toBe(true);
   expect(new TextDecoder().decode(received[0])).toContain('ORPC/1 REQorpcid01 conversations.list 1 1');
+});
+
+test('an abnormal 1005 closure renews the ticket and the new channel serves requests', async () => {
+  let tickets = 0;
+  const client = new RpcClient({ relay: { deviceId: 'device', accessToken: 'account-secret', fetchImpl: async () => { tickets++; return new Response(JSON.stringify(ticket()), { status: 201 }); } }, WebSocketImpl: Socket });
+  clients.push(client);
+  const connecting = client.connect();
+  await flush();
+  const first = Socket.instances.at(-1);
+  first.open();
+  first.message({ type: 'avi-remote-ready', version: 3, protocol: ORPC_PROTOCOL });
+  await connecting;
+  let closed;
+  client.socket.addEventListener('close', (event) => { closed = event; });
+  first.close(1005);
+  expect(closed.code).toBe(1005);
+  expect(closed.retryable).toBe(true);
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  expect(tickets).toBe(2);
+  const second = Socket.instances.at(-1);
+  expect(second).not.toBe(first);
+  second.open();
+  second.message({ type: 'avi-remote-ready', version: 3, protocol: ORPC_PROTOCOL });
+  await flush();
+  expect(client.closed).toBe(false);
+  expect(client.socket.readyState).toBe(1);
+  const pending = client.request('rpc:discover', {});
+  for (let i = 0; i < 200 && second.sent.length < 3; i++) await new Promise((resolve) => setTimeout(resolve, 5));
+  const attempt = /^\d+ ORPC\/1 REQ([0-9a-zA-Z_.@]+) rpc\.discover 1 1\n(.+)$/s.exec(second.sent[1].__frame);
+  expect(attempt).not.toBeNull();
+  const operation = JSON.parse(attempt[2]);
+  const responseBytes = new TextEncoder().encode(JSON.stringify({ jsonrpc: '2.0', id: operation.operationId, result: { apiVersion: 1 } }));
+  for (const part of responseFrames(attempt[1], responseBytes)) second.message(part);
+  second.message(controlFrame('RES', `${attempt[1]}#CHECKSEND`, await sha256Check(responseBytes)));
+  await expect(pending).resolves.toEqual({ apiVersion: 1 });
+});
+
+test('a relay client retries an unknown remote close with a fresh ticket', async () => {
+  let tickets = 0;
+  const client = new RpcClient({ relay: { deviceId: 'device', accessToken: 'account-secret', fetchImpl: async () => { tickets++; return new Response(JSON.stringify(ticket()), { status: 201 }); } }, WebSocketImpl: Socket });
+  clients.push(client);
+  const connecting = client.connect();
+  await flush();
+  const first = Socket.instances.at(-1);
+  first.open();
+  first.message({ type: 'avi-remote-ready', version: 3, protocol: ORPC_PROTOCOL });
+  await connecting;
+  let closed;
+  client.socket.addEventListener('close', (event) => { closed = event; });
+  first.close(4000);
+  expect(closed.code).toBe(4000);
+  expect(closed.retryable).toBe(true);
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  expect(tickets).toBe(2);
+  const second = Socket.instances.at(-1);
+  second.open();
+  second.message({ type: 'avi-remote-ready', version: 3, protocol: ORPC_PROTOCOL });
+  await flush();
+  expect(client.closed).toBe(false);
+  expect(client.socket.readyState).toBe(1);
+});
+
+test('unknown remote close codes stay retryable while protocol rejections do not', async () => {
+  for (const code of [1011, 4000, 4999]) {
+    const relay = new RelaySocket({ ...options, fetchImpl: async () => new Response(JSON.stringify(ticket()), { status: 201 }) });
+    clients.push(relay);
+    await flush();
+    const socket = Socket.instances.at(-1);
+    socket.open();
+    socket.message({ type: 'avi-remote-ready', version: 3, protocol: ORPC_PROTOCOL });
+    let closed;
+    relay.addEventListener('close', (event) => { closed = event; });
+    socket.close(code);
+    expect(closed.code).toBe(code);
+    expect(closed.retryable).toBe(true);
+  }
+  for (const code of [1002, 1008, 4003]) {
+    const relay = new RelaySocket({ ...options, fetchImpl: async () => new Response(JSON.stringify(ticket()), { status: 201 }) });
+    clients.push(relay);
+    await flush();
+    const socket = Socket.instances.at(-1);
+    socket.open();
+    socket.message({ type: 'avi-remote-ready', version: 3, protocol: ORPC_PROTOCOL });
+    let closed;
+    relay.addEventListener('close', (event) => { closed = event; });
+    socket.close(code);
+    expect(closed.code).toBe(code);
+    expect(closed.retryable).toBe(false);
+  }
 });

@@ -4,17 +4,11 @@ A browser workspace for connecting to your Avi desktop instances, managing conve
 
 **Hosted app:** [workspace.aivax.net](https://workspace.aivax.net) · **Source:** [aivaxlabs/avi-workspace](https://github.com/aivaxlabs/avi-workspace)
 
-## Notes
-
-Open **Notes** in the auxiliary panel to manage the connected Avi’s persistent user notes. Lists default to the selected conversation’s working folder; **All working folders** shows other lists. Search and filters cover priority, done/archive status, creation/update time and deadlines. Notes support text, move-to-list editing, ordered subtasks, completion, archive/restore, and attachment management. Move up/down controls reorder lists or switch notes to manual order. Deleting a list or its archived notes requires confirmation.
-
-Type `/note your note text` in the composer to create a note through Avi Desktop’s configured auxiliary model using conversation context. It is not sent as a chat message. Errors preserve the draft. Attach files in the saved note, not through chat attachments.
-
-Browser files upload and download in 256 KiB chunks (up to 50 MiB per file, 50 files per note). Progress and errors appear in the editor; attachment changes save immediately. Bytes stay in browser memory; download URLs are revoked. No browser or host file path is transmitted. Notes refresh after changes and every five seconds while the panel is mounted. Optional methods are gated by `rpc:discover`; older Avi instances show an unavailable state rather than a compatibility fallback. Updates made in Desktop and agents become visible on refresh.
-
 ## Connection details
 
 Click the signal icon beside the instance selector to inspect connection state, the minimum, average and maximum completed-call round trip, upload/download ORPC traffic, byte counters, failed calls and reconnections. Values update every second without extra network requests. Round trip includes server processing and recovery, not just network latency; throughput is observed traffic, not a bandwidth test. TCP packet loss is not available to browser WebSocket clients and is marked unavailable. Counters are in memory for the current global and conversation clients, and the conversation counters reset when switching threads.
+
+Transient connection failures retry automatically, including initial connection failures and close code 1005. A single connection warning appears after three failed connections or 15 seconds disconnected; repeated workspace/context refresh failures are summarized after three failures. **Retry** reopens the global and conversation channels in place, without clearing the selected thread, loaded history, composer controls, text or attachments. Authentication and protocol rejections pause automatic retries but remain manually retryable after correcting access/settings. Technical details stay in the connection-details dialog. Recovery preserves state while the page remains open, not across reloads or browser crashes.
 
 ## Quick start
 
@@ -75,7 +69,7 @@ Serve the production `dist/` directory over HTTPS (localhost also works). Chromi
 
 The interface automatically follows the system light/dark preference through `prefers-color-scheme`, including browser chrome where supported, without a saved theme setting. The standalone app uses dedicated regular/maskable/Apple icons, dynamic viewport height and safe-area insets; its manifest launch colors and iOS translucent status-bar style remain dark. After its first successful online load, the public app shell can open offline. Connections remain in IndexedDB; conversations, drafts and attachment bytes are not cached. Closing the app can lose unsynced drafts.
 
-The browser checks and downloads service-worker updates in the background. There is no forced reload or `skipWaiting`: close all Workspace windows/tabs and reopen to activate a downloaded update. Service workers are event-driven, not permanent background processes: they do not keep RPC WebSockets alive, send queued messages while closed, or guarantee timers. Background sync, push notifications and notification permissions are not implemented.
+Each production build generates a new asset revision and service-worker cache name. Online navigation fetches fresh HTML without using the browser HTTP cache, falling back to the precached shell only when offline. The browser checks for service-worker updates on launch and when the PWA returns to the foreground. Once the new shell is cached, it activates immediately and removes older shell caches without deleting connections or conversations. The current screen is not force-reloaded; reopen the PWA to load the new JavaScript and CSS. Service workers are event-driven, not permanent background processes: they do not keep RPC WebSockets alive, send queued messages while closed, or guarantee timers. Background sync, push notifications and notification permissions are not implemented.
 
 ## Security and persistence
 
@@ -121,7 +115,7 @@ There is no path-based, renamed-field, or old-version fallback.
 ## Explicitly unsupported or discovery-gated
 
 - Direct browser access to paths on the Avi host.
-- File-picker and chunked upload are not implemented. Clipboard images/files are accepted as inline attachments, up to 512 KiB combined, within Avi's 1 MiB WebSocket message limit.
+- File-picker and clipboard uploads accept up to 10 MB (10,485,760 bytes) per file. Existing attachment data URLs travel through native ORPC multipart frames, each at most 64 KiB; the relay's 1 MiB message limit is unchanged. The full JSON request, including base64 expansion, is bounded to 32 MiB with envelope headroom; split larger groups across messages.
 - Attachment or diff previews when the corresponding RPC method is absent.
 - Rubber Duck/sub-agent creation unless exposed by the final RPC discovery surface; existing child threads can be listed/opened.
 - Any RPC API version other than v1.
@@ -129,7 +123,7 @@ There is no path-based, renamed-field, or old-version fallback.
 
 ## Pending RPC capabilities
 
-- Large attachment transfer requires a browser-safe chunked upload method. Small clipboard images/files use the documented Attachment.dataUrl format through existing composer/save and send methods; no host paths are supplied.
+- Uploads use the documented Attachment.dataUrl format through existing composer/save and send methods; ORPC handles chunking, integrity checks and bounded delivery recovery. No separate upload protocol or caller-supplied host path is used. An unconfirmed send retains its draft; an operation with an unknown outcome must be checked against conversation state before resubmitting.
 - Sub-agent and Rubber Duck creation wait for creation methods advertised by `rpc:discover`; listing and opening existing child threads already works.
 - Draft saves are last-write-wins: `composer-state:save` has no revision checking or compare-and-set, so two writers on the same conversation can overwrite each other (see the Avi RPC v1 `composer-state:save` contract). Atomic or revision-checked draft saves are a roadmap dependency and are not implemented.
 - Other saved instances are not monitored in background. Aggregated monitoring requires separately scoped session/subscription design.

@@ -228,6 +228,63 @@ describe('App connections and workspace lifecycle', () => {
       expect(stream.readyState).toBe(3);
     } finally { globalThis.fetch = originalFetch; }
   });
+  test('Retry revives both closed channels without replacing the composer or losing its draft', async () => {
+    await saveConnection({ label: 'Local', serverUrl: 'http://localhost:18991', apiKey: 'key-1' }, globalThis.indexedDB);
+    await renderApp();
+    await openWorkspace();
+    const firstStream = FakeSocket.instances.find((socket) => socket.url.includes('/streams/'));
+    await act(async () => { firstStream.message({ method: 'conversation:ready', params: {} }); await flush(); });
+    await waitForDom('composer', 'textarea');
+    const textarea = document.querySelector('textarea');
+    await act(async () => { textarea.value = 'Keep this local draft'; textarea.dispatchEvent(new window.Event('input', { bubbles: true })); await flush(); });
+    const initial = [...FakeSocket.instances];
+    await act(async () => {
+      for (const socket of initial) if (socket.readyState === 1) socket.close(4003, 'Rejected');
+      await flush();
+    });
+    expect(document.querySelector('textarea')).toBe(textarea);
+    expect(document.querySelector('[role="status"].workspace-connection-alert')).toBeNull();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 15_050)); });
+    expect(document.querySelectorAll('[role="status"].workspace-connection-alert')).toHaveLength(1);
+    expect(document.querySelector('.workspace-connection-alert').textContent).toContain('connection problems');
+    await act(async () => { document.querySelector('[role="status"].workspace-connection-alert button').click(); await flush(); });
+    for (let i = 0; i < 500 && document.querySelector('[role="status"].workspace-connection-alert'); i++) await act(async () => { await flush(); });
+    expect(FakeSocket.instances.filter((socket) => !initial.includes(socket) && socket.readyState === 1)).toHaveLength(2);
+    expect(document.querySelector('[role="status"].workspace-connection-alert')).toBeNull();
+    expect(document.querySelector('textarea')).toBe(textarea);
+    expect(textarea.value).toBe('Keep this local draft');
+    expect(document.querySelector('textarea').closest('form').querySelector('[aria-label="Send"]').disabled).toBe(false);
+  }, 25_000);
+
+  test('opening survives an initial transient socket failure without another click', async () => {
+    await saveConnection({ label: 'Local', serverUrl: 'http://localhost:18991', apiKey: 'key-1' }, globalThis.indexedDB);
+    await renderApp();
+    await act(async () => {
+      buttonByText('Open workspace').click();
+      FakeSocket.instances.at(-1).close(1006, 'Temporary network loss');
+      await flush();
+    });
+    await waitForDom('workspace after automatic retry', 'select[aria-label="Active Avi instance"]');
+    expect(FakeSocket.instances.length).toBeGreaterThanOrEqual(2);
+    expect(document.querySelector('.workspace-connection-alert')).toBeNull();
+  });
+
+  test('initial automatic retries can be cancelled without deleting the saved connection', async () => {
+    await saveConnection({ label: 'Local', serverUrl: 'http://localhost:18991', apiKey: 'key-1' }, globalThis.indexedDB);
+    await renderApp();
+    await act(async () => {
+      buttonByText('Open workspace').click();
+      FakeSocket.instances.at(-1).close(1006, 'Temporary network loss');
+      await flush();
+    });
+    await act(async () => { buttonByText('Cancel').click(); await flush(); });
+    const count = FakeSocket.instances.length;
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1100)); });
+    expect(FakeSocket.instances).toHaveLength(count);
+    expect(document.querySelector('select[aria-label="Active Avi instance"]')).toBeNull();
+    expect(await listConnections()).toHaveLength(1);
+  });
+
   test('probing performs only RPC discovery', async () => {
     await saveConnection({ label: 'Local', serverUrl: 'http://localhost:18991', apiKey: 'key-1' }, globalThis.indexedDB);
     await renderApp();
@@ -274,8 +331,51 @@ describe('App connections and workspace lifecycle', () => {
     const newChat = document.querySelector('.folder-new-chat');
     expect(newChat).not.toBeNull();
     await act(async () => { newChat.click(); await flush(); await flush(); });
-    expect(modelsRequested()).toBe(1);
+    for (let i = 0; i < 100 && modelsRequested() < 2; i += 1) await act(async () => { await flush(); });
+    expect(modelsRequested()).toBe(2);
+    for (let i = 0; i < 10 && !FakeSocket.instances.some((socket) => socket.sent.some((request) => request.method.replace('.', ':') === 'conversations:create')); i += 1) await act(async () => { await flush(); });
     expect(FakeSocket.instances.some((socket) => socket.sent.some((request) => request.method.replace('.', ':') === 'conversations:create'))).toBe(true);
+  });
+
+  test.each(['model:two', 'model:removed'])('new chat uses the last available model (%s)', async (lastModel) => {
+    await saveConnection({ label: 'Local', serverUrl: 'http://localhost:18991', apiKey: 'key-1' }, globalThis.indexedDB);
+    let created;
+    FakeSocket.responder = (socket, method, params) => {
+      if (method === 'models:list') return {
+        models: [{ id: 'model:one', name: 'One', reasoning: [] }, { id: 'model:two', name: 'Two', reasoning: [] }],
+        lastModel,
+        messageDeliveryMode: 'queue',
+      };
+      if (method === 'conversations:create') created = params;
+      return standardResponder(socket, method);
+    };
+    await renderApp();
+    await openWorkspace();
+    await act(async () => { document.querySelector('.folder-new-chat').click(); await flush(); await flush(); });
+    for (let i = 0; i < 10 && !created; i += 1) await act(async () => { await flush(); });
+    expect(created.model).toBe(lastModel === 'model:two' ? 'model:two' : 'model:one');
+    expect(modelsRequested()).toBe(2);
+  });
+
+  test('new chat reads a model preference changed after opening the workspace', async () => {
+    await saveConnection({ label: 'Local', serverUrl: 'http://localhost:18991', apiKey: 'key-1' }, globalThis.indexedDB);
+    let lastModel = 'model:one';
+    let created;
+    FakeSocket.responder = (socket, method, params) => {
+      if (method === 'models:list') return {
+        models: [{ id: 'model:one', name: 'One', reasoning: [] }, { id: 'model:two', name: 'Two', reasoning: [] }],
+        lastModel,
+        messageDeliveryMode: 'queue',
+      };
+      if (method === 'conversations:create') created = params;
+      return standardResponder(socket, method);
+    };
+    await renderApp();
+    await openWorkspace();
+    lastModel = 'model:two';
+    await act(async () => { document.querySelector('.folder-new-chat').click(); await flush(); await flush(); });
+    for (let i = 0; i < 10 && !created; i += 1) await act(async () => { await flush(); });
+    expect(created.model).toBe('model:two');
   });
 
   test('exiting during an in-flight refresh leaves the workspace closed', async () => {

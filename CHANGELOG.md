@@ -2,11 +2,6 @@
 
 ## [Unreleased]
 
-### Added
-
-- Notes auxiliary panel with folder-scoped lists, priority/date/status filters, completion/archive, list and note ordering, subtasks, move-to-list editing, and deletion confirmation.
-- `/note` uses the Desktop auxiliary model through global RPC without sending a chat message. Browser Notes attachments upload/download in 256 KiB chunks, with capability gating, progress and in-memory file handling.
-
 ### Changed
 
 - **Breaking:** RPC now requires ORPC Draft 2 (`avi-orpc-draft2`) with multipart requests/responses, fresh recovery IDs, reserved cancellation/integrity/heartbeat/shutdown controls, and mandatory SHA-256 `CHECKSEND` verification. Upgrade Desktop and Workspace together; no Draft 1 fallback is provided. The physical `avi-relay-v1` transport is unchanged. Updated the RPC documentation and bundled specification.
@@ -14,6 +9,9 @@
 
 ### Fixed
 
+- Recover initial transient failures and relay close 1005; Retry reconnects both channels in place without clearing local drafts, attachments or loaded history. Preserve text typed while an earlier send is pending.
+- Consolidate repeated connection failures into one delayed warning instead of displaying every transport error; retain technical details in the connection dialog.
+- Accept files up to 10 MiB each using native ORPC multipart transfers, with explicit aggregate request limits instead of the old 512 KiB inline limit.
 - ORPC ignores byte-identical parts duplicated after dispatch and acknowledges repeated integrity checks without redispatch.
 
 ## [0.2.0] - 2026-09-08
