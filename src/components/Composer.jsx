@@ -7,7 +7,6 @@ import { moveQueueId, steerQueuedParams } from '../lib/queue-actions.js';
 const BUILT_INS = [
   { name: 'stop', description: 'Stop the active run' },
   { name: 'side', description: 'Open a side chat' },
-  { name: 'note', description: 'Create a user note with the auxiliary model' },
 ];
 const PERMISSIONS = [
   { id: 'ask_for_approval', label: 'Ask for approval', description: 'Ask before every tool call', icon: 'ri-shield-keyhole-line' },
@@ -16,17 +15,17 @@ const PERMISSIONS = [
 ];
 
 const AUTOSAVE_DEBOUNCE_MS = 300;
-const INLINE_FILES_LIMIT = 512 * 1024;
+const FILE_SIZE_LIMIT = 10 * 1024 * 1024;
 
 function checkComposerPayload(payload) {
-  if (new TextEncoder().encode(JSON.stringify(payload)).byteLength > 900 * 1024) throw new Error('Message and attachments exceed the inline RPC limit. Remove an attachment or shorten the message.');
+  if (new TextEncoder().encode(JSON.stringify(payload)).byteLength > 32 * 1024 * 1024 - 4096) throw new Error('Message and attachments exceed the 32 MB transfer limit. Send some files in another message.');
 }
 
 function serializeDraft({ permissionMode, model, reasoningEffort, workMode, ultraMode, text, attachments }) {
   return { permissionMode, model, reasoningEffort: reasoningEffort || null, workMode, ultraMode, draftText: text, attachments };
 }
 
-export function Composer({ client, globalClient, globalDiscovery, onNoteCreated, state, models, discovery, draftCache, intelligenceLevels = [], messageDeliveryMode = 'queue', compact = false, onExpand, onSent, onStop, onSideChat, onOpenTasks, onOpenAgents, onQueueOrder, onError, composerRef }) {
+export function Composer({ client, state, models, lastModel, discovery, draftCache, intelligenceLevels = [], messageDeliveryMode = 'queue', compact = false, onExpand, onSent, onStop, onSideChat, onOpenTasks, onOpenAgents, onQueueOrder, onError, composerRef }) {
   const conversation = state.conversation;
   const snapshot = state.composer;
   const goal = conversation.goal;
@@ -149,7 +148,7 @@ export function Composer({ client, globalClient, globalDiscovery, onNoteCreated,
     const nextText = draft.draftText ?? '';
     const nextAttachments = draft.attachments ?? [];
     const nextPermissionMode = draft.permissionMode ?? 'approve_for_me';
-    const nextModel = draft.model || conversation.model || models[0]?.id || '';
+    const nextModel = [draft.model, conversation.model, lastModel, models[0]?.id].find((id) => models.some((item) => item.id === id)) ?? '';
     const efforts = models.find((item) => item.id === nextModel)?.reasoning ?? [];
     const nextReasoningEffort = efforts.includes(draft.reasoningEffort) ? draft.reasoningEffort : efforts[0] ?? '';
     const nextWorkMode = draft.workMode ?? (conversation.orchestrationMode === 'plan' ? 'plan' : null);
@@ -180,6 +179,12 @@ export function Composer({ client, globalClient, globalDiscovery, onNoteCreated,
     scheduleSave();
     return undefined;
   }, [attachments, conversation?.id, draftCache, hydrated, model, permissionMode, reasoningEffort, text, ultraMode, workMode]);
+
+  useEffect(() => {
+    if (!supportsMethod(discovery, METHODS.composerSave)) setSaveStatus('unsupported');
+    else if (dirtyRef.current) scheduleSave();
+    else setSaveStatus('saved');
+  }, [discovery]);
 
   useEffect(() => {
     aliveRef.current = true;
@@ -282,12 +287,12 @@ export function Composer({ client, globalClient, globalDiscovery, onNoteCreated,
           ? (supportsMethod(discovery, METHODS.mentions) ? ((await client.request(METHODS.mentions, { query })).paths ?? []).map((item) => ({ ...item, label: item.label ?? item.path, value: item.path })) : [])
           : supportsMethod(discovery, METHODS.commands) ? (await client.request(METHODS.commands)).filter((item) => item.type === (invocation[1] === '$' ? 'skill' : 'workflow') && (!query || item.name.toLowerCase().includes(query.toLowerCase()))).map((item) => ({ ...item, label: `${invocation[1]}${item.name}`, value: `${invocation[1]}${item.name}` })) : [];
         if (cancelled) return;
-        setOptions(invocation[1] === '/' ? [...BUILT_INS.filter((item) => item.name === 'note' ? supportsMethod(globalDiscovery, METHODS.generateNote) : supportsMethod(discovery, item.name === 'stop' ? METHODS.stop : METHODS.createSideChat)).map((item) => ({ ...item, label: `/${item.name}`, value: `/${item.name}` })), ...remote] : remote);
+        setOptions(invocation[1] === '/' ? [...BUILT_INS.filter((item) => supportsMethod(discovery, item.name === 'stop' ? METHODS.stop : METHODS.createSideChat)).map((item) => ({ ...item, label: `/${item.name}`, value: `/${item.name}` })), ...remote] : remote);
         setActiveOption(0);
       } catch { if (!cancelled) setOptions([]); }
     }, 120);
     return () => { cancelled = true; clearTimeout(timer.current); };
-  }, [discovery, globalDiscovery, invocation?.[0], invocation?.[2], client, suggestionsDismissed]);
+  }, [discovery, invocation?.[0], invocation?.[2], client, suggestionsDismissed]);
 
   useEffect(() => {
     if (!options.length) return;
@@ -320,8 +325,9 @@ export function Composer({ client, globalClient, globalDiscovery, onNoteCreated,
     setPasting(true);
     try {
       const existing = latestDraftRef.current?.attachments ?? attachments;
+      if (files.some((file) => file.size > FILE_SIZE_LIMIT)) throw new Error('Each file must be 10 MB or smaller.');
       const total = [...existing, ...files].reduce((sum, item) => sum + (Number(item.size) || 0), 0);
-      if (total > INLINE_FILES_LIMIT) throw new Error('Attachments are limited to 512 KiB combined. Larger files require chunked upload support from Avi.');
+      if (Math.ceil(total / 3) * 4 > 32 * 1024 * 1024 - 4096) throw new Error('Attachments exceed the 32 MB transfer limit. Send some files in another message.');
       const added = await Promise.all(files.map(async (file) => {
         const dataUrl = await new Promise((resolve, reject) => {
           const reader = new window.FileReader();
@@ -369,19 +375,6 @@ export function Composer({ client, globalClient, globalDiscovery, onNoteCreated,
       if (!supportsMethod(discovery, METHODS.createSideChat)) return onError(new Error('Side chats are not available on this Avi instance.'));
       return Promise.resolve().then(onSideChat).catch(onError);
     }
-    if (/^\s*\/note(?:\s|$)/i.test(text)) {
-      if (!supportsMethod(globalDiscovery, METHODS.generateNote)) return onError(new Error('Creating notes is not supported by this Avi instance.'));
-      const prompt = text.replace(/^\s*\/note\s*/i, '');
-      if (!prompt.trim()) return onError(new Error('Write the note after /note.'));
-      if (attachments.length) return onError(new Error('Remove chat attachments and add files to the saved note in Notes.'));
-      setBusy(true);
-      try {
-        await globalClient.request(METHODS.generateNote, { conversationId: conversation.id, prompt });
-        if (aliveRef.current) { setText(''); onNoteCreated?.(); }
-      } catch (failure) { if (aliveRef.current) onError(failure); }
-      finally { if (aliveRef.current) setBusy(false); }
-      return;
-    }
     if (!supportsMethod(discovery, METHODS.send)) return onError(new Error('Sending messages is not available on this Avi instance.'));
     setBusy(true);
     try {
@@ -393,8 +386,8 @@ export function Composer({ client, globalClient, globalDiscovery, onNoteCreated,
       } else {
         await client.request(METHODS.send, { text: text.trim(), model, reasoningEffort: reasoningEffort || null, attachments, permissionMode, workMode, ultraMode, steer: state.run.active && activeSendMode === 'steer' });
       }
-      setText('');
-      setAttachments([]);
+      setText((current) => current === text ? '' : current);
+      setAttachments((current) => current.filter((item) => !attachments.some((sent) => sent.id === item.id)));
       await onSent();
     } catch (error) { onError(error); }
     finally { setBusy(false); }
@@ -498,7 +491,7 @@ export function Composer({ client, globalClient, globalDiscovery, onNoteCreated,
       }} />
       <footer>
         <div class="composer-controls">
-          <div class="composer-menu-holder"><button type="button" class="round-control" aria-label="Composer actions" aria-haspopup="menu" aria-expanded={openMenu === 'plus'} onClick={() => setOpenMenu(openMenu === 'plus' ? null : 'plus')}><i class="ri-add-line" /></button>{openMenu === 'plus' && <div class="composer-menu plus-menu" role="menu"><button type="button" role="menuitem" disabled={busy || pasting || !supportsMethod(discovery, METHODS.send)} title="Attach files (512 KiB combined limit)" onClick={() => { fileInput.current?.click(); setOpenMenu(null); }}><i class="ri-attachment-2" />Attach files</button><button type="button" role="menuitemcheckbox" aria-checked={ultraMode} onClick={() => { setUltraMode(!ultraMode); setWorkMode(null); setOpenMenu(null); }}><i class="ri-flashlight-line" />Ultra</button><button type="button" role="menuitemcheckbox" aria-checked={workMode === 'goal'} onClick={() => { setWorkMode(workMode === 'goal' ? null : 'goal'); setUltraMode(false); setOpenMenu(null); }}><i class="ri-focus-3-line" />Goal</button><button type="button" role="menuitemcheckbox" aria-checked={workMode === 'plan'} onClick={() => { setWorkMode(workMode === 'plan' ? null : 'plan'); setUltraMode(false); setOpenMenu(null); }}><i class="ri-list-check-3" />Plan</button><button type="button" role="menuitem" disabled={!supportsMethod(discovery, METHODS.createSideChat)} onClick={() => { setOpenMenu(null); Promise.resolve().then(onSideChat).catch(onError); }}><i class="ri-chat-new-line" />Side chat</button><span class="mobile-permission-label">Permission</span><div class="mobile-permission-options">{PERMISSIONS.map((item) => <button key={item.id} type="button" role="menuitemradio" aria-checked={item.id === permissionMode} onClick={() => { setPermissionMode(item.id); setOpenMenu(null); }}><i class={item.icon} /><span><strong>{item.label}</strong><small>{item.description}</small></span></button>)}</div></div>}</div>
+          <div class="composer-menu-holder"><button type="button" class="round-control" aria-label="Composer actions" aria-haspopup="menu" aria-expanded={openMenu === 'plus'} onClick={() => setOpenMenu(openMenu === 'plus' ? null : 'plus')}><i class="ri-add-line" /></button>{openMenu === 'plus' && <div class="composer-menu plus-menu" role="menu"><button type="button" role="menuitem" disabled={busy || pasting || !supportsMethod(discovery, METHODS.send)} title="Attach files (up to 10 MB per file)" onClick={() => { fileInput.current?.click(); setOpenMenu(null); }}><i class="ri-attachment-2" />Attach files</button><button type="button" role="menuitemcheckbox" aria-checked={ultraMode} onClick={() => { setUltraMode(!ultraMode); setWorkMode(null); setOpenMenu(null); }}><i class="ri-flashlight-line" />Ultra</button><button type="button" role="menuitemcheckbox" aria-checked={workMode === 'goal'} onClick={() => { setWorkMode(workMode === 'goal' ? null : 'goal'); setUltraMode(false); setOpenMenu(null); }}><i class="ri-focus-3-line" />Goal</button><button type="button" role="menuitemcheckbox" aria-checked={workMode === 'plan'} onClick={() => { setWorkMode(workMode === 'plan' ? null : 'plan'); setUltraMode(false); setOpenMenu(null); }}><i class="ri-list-check-3" />Plan</button><button type="button" role="menuitem" disabled={!supportsMethod(discovery, METHODS.createSideChat)} onClick={() => { setOpenMenu(null); Promise.resolve().then(onSideChat).catch(onError); }}><i class="ri-chat-new-line" />Side chat</button><span class="mobile-permission-label">Permission</span><div class="mobile-permission-options">{PERMISSIONS.map((item) => <button key={item.id} type="button" role="menuitemradio" aria-checked={item.id === permissionMode} onClick={() => { setPermissionMode(item.id); setOpenMenu(null); }}><i class={item.icon} /><span><strong>{item.label}</strong><small>{item.description}</small></span></button>)}</div></div>}</div>
           <div class="composer-menu-holder permission-control"><button type="button" class="control-chip" aria-haspopup="menu" aria-expanded={openMenu === 'permission'} onClick={() => setOpenMenu(openMenu === 'permission' ? null : 'permission')}><i class={permission.icon} /><span>{permission.label}</span><i class="ri-arrow-down-s-line" /></button>{openMenu === 'permission' && <div class="composer-menu permission-menu" role="menu">{PERMISSIONS.map((item) => <button key={item.id} type="button" role="menuitemradio" aria-checked={item.id === permissionMode} onClick={() => { setPermissionMode(item.id); setOpenMenu(null); }}><i class={item.icon} /><span><strong>{item.label}</strong><small>{item.description}</small></span></button>)}</div>}</div>
           {workMode && <button type="button" class="mode-chip" onClick={() => setWorkMode(null)}><i class={workMode === 'goal' ? 'ri-focus-3-line' : 'ri-list-check-3'} />{workMode === 'goal' ? 'Goal' : 'Plan'}<i class="ri-close-line" /></button>}
           {ultraMode && <button type="button" class="mode-chip" onClick={() => setUltraMode(false)}><i class="ri-flashlight-line" />Ultra<i class="ri-close-line" /></button>}

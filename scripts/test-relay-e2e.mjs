@@ -16,7 +16,7 @@ const ACCESS_TOKEN = 'aivax-session-token';
 assert.equal(ORPC_PROTOCOL, 'avi-orpc-draft2');
 
 function startRelayPeer() {
-  const state = { opens: [], requests: [], tickets: [] };
+  const state = { opens: [], requests: [], tickets: [], frames: [] };
   const server = Bun.serve({
     port: 0,
     fetch(request, server) {
@@ -42,7 +42,9 @@ function startRelayPeer() {
             state.requests.push(method);
             const result = method === 'rpc.discover'
               ? { methods: ['rpc.discover'], appVersion: '0.0.0-test', versions: { rpc: 1 } }
-              : { ok: true, method };
+              : method === 'chat.send'
+                ? { bytes: Buffer.from(request.params.attachments[0].dataUrl.split(',')[1], 'base64').length, checksum: await crypto.subtle.digest('SHA-256', Buffer.from(request.params.attachments[0].dataUrl.split(',')[1], 'base64')).then((value) => Buffer.from(value).toString('hex')) }
+                : { ok: true, method };
             return new TextEncoder().encode(JSON.stringify({ jsonrpc: '2.0', id: request.operationId, result }));
           },
           onError: () => {},
@@ -81,6 +83,7 @@ function startRelayPeer() {
           return;
         }
         if (parsed.type !== 'REQ') return;
+        if (!parsed.control) state.frames.push({ bytes: raw.byteLength, method: parsed.method });
         ws.data.peer.receive(new Uint8Array(raw));
       },
       close(ws) {
@@ -136,6 +139,13 @@ async function testRpcClientOverRelay() {
       assert.deepEqual(peer.state.opens, [{ type: 'avi-remote-open', version: 3, protocol: ORPC_PROTOCOL, path: '/rpc' }]);
       assert.ok(peer.state.requests.includes('rpc.discover'), 'discovery must travel as a dotted wire method in an ORPC frame');
       assert.deepEqual(discovery, { methods: ['rpc.discover'], appVersion: '0.0.0-test', versions: { rpc: 1 } });
+      const file = Buffer.alloc(10 * 1024 * 1024, 0xa5);
+      const checksum = Buffer.from(await crypto.subtle.digest('SHA-256', file)).toString('hex');
+      const uploaded = await client.request('chat:send', { attachments: [{ name: '10mb.bin', size: file.length, dataUrl: `data:application/octet-stream;base64,${file.toString('base64')}` }] });
+      assert.deepEqual(uploaded, { bytes: file.length, checksum });
+      assert.ok(peer.state.frames.length > 200, 'upload must use native ORPC multipart frames');
+      assert.ok(peer.state.frames.every((frame) => frame.bytes <= 64 * 1024), 'every frame remains below the relay payload cap');
+      console.log('(pass) 10 MiB file survives native multipart ORPC over real relay sockets with matching SHA-256');
     } finally { await flush(); await client.close(); }
     await flush();
     console.log('(pass) RpcClient opens relay sessions and completes binary ORPC RPC over the real socket');

@@ -109,7 +109,7 @@ function mount(state = createState(), overrides = {}) {
     errors,
     draftCache,
     client,
-    rerender(nextState) { act(() => render(h(Composer, { ...rendered, state: nextState }), root)); },
+    rerender(nextState, nextProps = {}) { act(() => render(h(Composer, { ...rendered, ...nextProps, state: nextState }), root)); },
     unmount() { act(() => render(null, root)); },
   };
 }
@@ -333,6 +333,36 @@ describe('composer parity', () => {
     expect(cache.get('thread-1').dirty).toBe(false);
   });
 
+  test('recovers draft saving and sending when conversation discovery arrives', async () => {
+    const state = createState();
+    const view = mount(state, { discovery: null });
+    expect(view.root.querySelector('.composer-save-status').textContent).toContain('Draft only in this tab');
+    expect(view.root.querySelector('[aria-label="Send"]').disabled).toBe(true);
+    type(view.root, 'Ready to send');
+    await flush();
+
+    view.rerender(state, { discovery: discoveryAll });
+    expect(view.root.querySelector('[aria-label="Send"]').disabled).toBe(false);
+    await wait(350);
+    expect(saveCalls(view)).toHaveLength(1);
+    expect(view.root.querySelector('.composer-save-status').textContent).toContain('Saved');
+
+    act(() => view.root.querySelector('form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })));
+    await flush();
+    expect(view.calls.filter((call) => call.method === METHODS.send)).toHaveLength(1);
+  });
+
+  test('uses last available model when an empty conversation has no persisted model', () => {
+    const state = createState({ composer: null, conversation: { ...createState().conversation, model: '' } });
+    const preferred = mount(state, { lastModel: 'model:two' });
+    expect(preferred.root.querySelector('.model-chip').textContent).toContain('Model Two');
+    preferred.unmount();
+
+    const fallback = mount(state, { lastModel: 'model:missing' });
+    expect(fallback.root.querySelector('.model-chip').textContent).toContain('Model One');
+    fallback.unmount();
+  });
+
   test('reports unsupported saving and never calls composer-state:save', async () => {
     const view = mount(createState(), { discovery: discoveryWithout('composerSave') });
     type(view.root, 'Should not sync');
@@ -398,15 +428,31 @@ describe('composer parity', () => {
     } finally { view.unmount(); }
   });
 
+  test('accepts a 10 MiB file and keeps it in the draft for native ORPC chunking', async () => {
+    const view = mount(createState({ composer: { ...createState().composer, attachments: [] } }));
+    try {
+      const input = view.root.querySelector('input[type="file"]');
+      Object.defineProperty(input, 'files', { value: [new window.File([new Uint8Array(10 * 1024 * 1024)], 'limit.bin')] });
+      await act(async () => { input.dispatchEvent(new window.Event('change', { bubbles: true })); await new Promise((resolve) => setTimeout(resolve, 100)); });
+      expect(view.errors).toHaveLength(0);
+      const attachment = view.draftCache.get('thread-1').draft.attachments[0];
+      expect(attachment.size).toBe(10 * 1024 * 1024);
+      expect(Buffer.from(attachment.dataUrl.split(',')[1], 'base64').length).toBe(10 * 1024 * 1024);
+      act(() => view.root.querySelector('form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })));
+      await flush();
+      expect(view.calls.find((call) => call.method === METHODS.send).params.attachments[0]).toEqual(attachment);
+    } finally { view.unmount(); }
+  });
+
   test('file selection cancellation and oversized files leave attachments unchanged', async () => {
     const view = mount(createState({ composer: { ...createState().composer, attachments: [] } }));
     try {
       const input = view.root.querySelector('input[type="file"]');
       await act(async () => input.dispatchEvent(new window.Event('change', { bubbles: true })));
       expect(view.errors).toHaveLength(0);
-      Object.defineProperty(input, 'files', { value: [new window.File([new Uint8Array(512 * 1024 + 1)], 'large.bin')] });
+      Object.defineProperty(input, 'files', { value: [new window.File([new Uint8Array(10 * 1024 * 1024 + 1)], 'large.bin')] });
       await act(async () => input.dispatchEvent(new window.Event('change', { bubbles: true })));
-      expect(view.errors[0].message).toContain('512 KiB');
+      expect(view.errors[0].message).toContain('10 MB');
       expect(view.root.querySelector('.composer-markers')).toBeNull();
     } finally { view.unmount(); }
     const unsupported = mount(createState(), { discovery: discoveryWithout('send') });
@@ -440,9 +486,9 @@ describe('composer parity', () => {
     act(() => view.root.querySelector('textarea').dispatchEvent(textEvent));
     expect(textEvent.defaultPrevented).toBe(false);
     const event = new window.Event('paste', { bubbles: true, cancelable: true });
-    Object.defineProperty(event, 'clipboardData', { value: { files: [new window.File([new Uint8Array(512 * 1024 + 1)], 'large.png', { type: 'image/png' })] } });
+    Object.defineProperty(event, 'clipboardData', { value: { files: [new window.File([new Uint8Array(10 * 1024 * 1024 + 1)], 'large.png', { type: 'image/png' })] } });
     await act(async () => { view.root.querySelector('textarea').dispatchEvent(event); });
-    expect(view.errors[0].message).toContain('512 KiB');
+    expect(view.errors[0].message).toContain('10 MB');
     expect(view.root.querySelector('.composer-markers')).toBeNull();
     expect(saveCalls(view)).toHaveLength(0);
     view.unmount();
@@ -492,6 +538,22 @@ describe('composer parity', () => {
     await flush();
     expect(view.root.querySelector('textarea').value).toBe('');
     expect(sentOrder).toEqual(['sent']);
+  });
+
+  test('keeps newer text typed while an earlier message is awaiting delivery', async () => {
+    let resolveSend;
+    const view = mount(createState(), {
+      respond(method) { return method === METHODS.send ? new Promise((resolve) => { resolveSend = resolve; }) : Promise.resolve({}); },
+    });
+    try {
+      type(view.root, 'First message');
+      act(() => view.root.querySelector('form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })));
+      await flush();
+      type(view.root, 'Next draft while reconnecting');
+      await act(async () => { resolveSend({}); await flush(); });
+      expect(view.root.querySelector('textarea').value).toBe('Next draft while reconnecting');
+      expect(view.draftCache.get('thread-1').draft.draftText).toBe('Next draft while reconnecting');
+    } finally { view.unmount(); }
   });
 
   test('surfaces onSent rejections through onError after clearing the draft', async () => {
@@ -702,75 +764,4 @@ describe('composer parity', () => {
     });
   });
 
-  test('/note routes to global generate, clears the draft, and notifies instead of chatting', async () => {
-    const globals = [];
-    let noted = 0;
-    const globalClient = { request(method, params) { globals.push({ method, params }); return Promise.resolve({}); } };
-    const view = mount(createState({ composer: { ...createState().composer, draftText: '', attachments: [] } }), {
-      globalClient,
-      globalDiscovery: discoveryAll,
-      onNoteCreated() { noted += 1; },
-    });
-    try {
-      type(view.root, '/note Remember the deploy steps');
-      await flush();
-      act(() => view.root.querySelector('form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })));
-      await flush();
-      expect(globals).toEqual([{ method: METHODS.generateNote, params: { conversationId: 'thread-1', prompt: 'Remember the deploy steps' } }]);
-      expect(view.calls.some((call) => call.method === METHODS.send || call.method === METHODS.startGoal)).toBe(false);
-      expect(view.root.querySelector('textarea').value).toBe('');
-      expect(noted).toBe(1);
-    } finally { view.unmount(); }
-  });
-
-  test('/note keeps the draft when generation fails', async () => {
-    const globalClient = { request() { return Promise.reject(new Error('Note failed')); } };
-    const view = mount(createState({ composer: { ...createState().composer, draftText: '', attachments: [] } }), {
-      globalClient,
-      globalDiscovery: discoveryAll,
-    });
-    try {
-      type(view.root, '/note Keep this draft');
-      await flush();
-      act(() => view.root.querySelector('form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })));
-      await flush();
-      expect(view.errors.at(-1).message).toBe('Note failed');
-      expect(view.root.querySelector('textarea').value).toBe('/note Keep this draft');
-    } finally { view.unmount(); }
-  });
-
-  test('/note without discovery sends no mutation and reports support', async () => {
-    let globals = 0;
-    const view = mount(createState({ composer: { ...createState().composer, draftText: '', attachments: [] } }), {
-      globalClient: { request() { globals += 1; return Promise.resolve({}); } },
-      globalDiscovery: discoveryWithout('generateNote'),
-    });
-    try {
-      type(view.root, '/note Unsupported here');
-      await flush();
-      act(() => view.root.querySelector('form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })));
-      await flush();
-      expect(globals).toBe(0);
-      expect(view.calls.some((call) => call.method === METHODS.send || call.method === METHODS.startGoal)).toBe(false);
-      expect(view.errors.at(-1).message).toContain('Creating notes is not supported');
-      expect(view.root.querySelector('textarea').value).toBe('/note Unsupported here');
-    } finally { view.unmount(); }
-  });
-
-  test('/note rejects chat attachments without calling generation', async () => {
-    let globals = 0;
-    const view = mount(createState(), {
-      globalClient: { request() { globals += 1; return Promise.resolve({}); } },
-      globalDiscovery: discoveryAll,
-    });
-    try {
-      type(view.root, '/note Has an attachment');
-      await flush();
-      act(() => view.root.querySelector('form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })));
-      await flush();
-      expect(globals).toBe(0);
-      expect(view.errors.at(-1).message).toContain('Remove chat attachments');
-      expect(view.root.querySelector('textarea').value).toBe('/note Has an attachment');
-    } finally { view.unmount(); }
-  });
 });
