@@ -1,15 +1,18 @@
 import { defineConfig } from 'vite';
 import { readFileSync, realpathSync } from 'node:fs';
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import preact from '@preact/preset-vite';
 
 // Vite 7 and esbuild disagree on Windows junction paths; remove when Vite handles linked working directories.
 process.chdir(realpathSync.native(process.cwd()));
 
 const buildId = randomBytes(6).toString('hex');
+const commitSuffix = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim().slice(-7);
 
 export default defineConfig({
   base: './',
+  define: { 'import.meta.env.VITE_WORKSPACE_COMMIT': JSON.stringify(commitSuffix) },
   plugins: [
     preact(),
     {
@@ -19,12 +22,8 @@ export default defineConfig({
       generateBundle(_options, bundle) {
         const publicAssets = ['avi.png', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png', 'icons/apple-touch-icon.png'];
         const assets = [...Object.keys(bundle).filter((name) => !name.endsWith('.map')), ...publicAssets];
-        const hash = createHash('sha256');
-        for (const name of Object.keys(bundle).sort()) hash.update(bundle[name].code ?? bundle[name].source);
-        for (const name of publicAssets) hash.update(readFileSync(new URL(`./public/${name}`, import.meta.url)));
         const template = readFileSync(new URL('./src/service-worker.js', import.meta.url), 'utf8');
-        hash.update(template);
-        const source = template.replace('__PRECACHE_ASSETS__', JSON.stringify(assets)).replace('__PRECACHE_NAME__', '`avi-shell:${new URL(self.registration.scope).pathname}:' + hash.digest('hex').slice(0, 16) + '`');
+        const source = template.replace('__PRECACHE_ASSETS__', JSON.stringify(assets)).replace('__PRECACHE_NAME__', '`avi-shell:${new URL(self.registration.scope).pathname}:' + buildId + '`');
         this.emitFile({ type: 'asset', fileName: 'sw.js', source });
       },
     },

@@ -39,6 +39,7 @@
     > button { flex-shrink: 0; }
   }
   > .connection-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+  > .connections-revision { margin-top: 40px; color: --text-muted; font-size: --font-xs; text-align: center; }
   > .modal-backdrop { max-width: none; }
 }
 
