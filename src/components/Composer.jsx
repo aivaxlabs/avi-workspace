@@ -25,7 +25,7 @@ function serializeDraft({ permissionMode, model, reasoningEffort, workMode, ultr
   return { permissionMode, model, reasoningEffort: reasoningEffort || null, workMode, ultraMode, draftText: text, attachments };
 }
 
-export function Composer({ client, state, models, lastModel, discovery, draftCache, intelligenceLevels = [], messageDeliveryMode = 'queue', compact = false, onExpand, onSent, onStop, onSideChat, onOpenTasks, onOpenAgents, onQueueOrder, onError, composerRef }) {
+export function Composer({ client, state, models, lastModel, discovery, draftCache, intelligenceLevels = [], messageDeliveryMode = 'queue', compact = false, mobile = false, onExpand, onSent, onStop, onSideChat, onOpenTasks, onOpenAgents, onQueueOrder, onError, composerRef }) {
   const conversation = state.conversation;
   const snapshot = state.composer;
   const goal = conversation.goal;
@@ -74,6 +74,8 @@ export function Composer({ client, state, models, lastModel, discovery, draftCac
   const [ultraMode, setUltraMode] = useState(false);
   const [attachments, setAttachments] = useState([]);
   const [options, setOptions] = useState([]);
+  const [loadingOptions, setLoadingOptions] = useState(false);
+  const [optionsLoaded, setOptionsLoaded] = useState(false);
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
   const [activeOption, setActiveOption] = useState(0);
   const [openMenu, setOpenMenu] = useState(null);
@@ -98,6 +100,41 @@ export function Composer({ client, state, models, lastModel, discovery, draftCac
   const submitMode = useRef(null);
   const root = useRef();
   const fileInput = useRef();
+  const photoInput = useRef(null);
+  const cameraInput = useRef(null);
+  const videoInput = useRef(null);
+  const plusTriggerRef = useRef(null);
+  const modelTriggerRef = useRef(null);
+  const modelDialogRef = useRef(null);
+  const [modelSheetOpen, setModelSheetOpen] = useState(false);
+  const [audioOpen, setAudioOpen] = useState(false);
+  const [audioPhase, setAudioPhase] = useState('idle');
+  const [audioBlob, setAudioBlob] = useState(null);
+  const [audioElapsed, setAudioElapsed] = useState(0);
+  const audioDialogRef = useRef(null);
+  const recorderRef = useRef(null);
+  const audioStreamRef = useRef(null);
+  const audioSessionRef = useRef(0);
+  const canRecordAudio = typeof window.MediaRecorder === 'function' && Boolean(navigator.mediaDevices?.getUserMedia);
+  const attachmentsDisabled = busy || pasting || !supportsMethod(discovery, METHODS.send);
+  useModalFocus({ open: modelSheetOpen, containerRef: modelDialogRef, returnFocusRef: modelTriggerRef, onClose: () => setModelSheetOpen(false) });
+  useModalFocus({ open: audioOpen, containerRef: audioDialogRef, returnFocusRef: plusTriggerRef, onClose: closeRecorder });
+  useEffect(() => {
+    if (mobile) return;
+    setModelSheetOpen(false);
+    closeRecorder();
+  }, [mobile]);
+  useEffect(() => {
+    closeRecorder();
+    setModelSheetOpen(false);
+    return releaseAudio;
+  }, [conversation.id]);
+  useEffect(() => {
+    if (audioPhase !== 'recording') return;
+    const startedAt = Date.now();
+    const interval = setInterval(() => setAudioElapsed(Math.floor((Date.now() - startedAt) / 1000)), 1000);
+    return () => clearInterval(interval);
+  }, [audioPhase]);
   const modelHolderRef = useRef(null);
   const effortHolderRef = useRef(null);
   const modelSubmenuRef = useRef(null);
@@ -248,7 +285,7 @@ export function Composer({ client, state, models, lastModel, discovery, draftCac
     const submenu = modelSubmenu === 'model' ? modelSubmenuRef.current : effortSubmenuRef.current;
     if (!holder || !submenu) return undefined;
     const position = () => {
-      if (window.matchMedia('(max-width: 640px)').matches) {
+      if (window.matchMedia?.('(max-width: 640px)')?.matches) {
         for (const property of ['right', 'left', 'top']) submenu.style.removeProperty(property);
         return;
       }
@@ -278,9 +315,13 @@ export function Composer({ client, state, models, lastModel, discovery, draftCac
   useEffect(() => {
     clearTimeout(timer.current);
     setOptions([]);
+    setLoadingOptions(false);
+    setOptionsLoaded(false);
     if (!invocation || suggestionsDismissed) return;
     let cancelled = false;
     timer.current = setTimeout(async () => {
+      const canFetch = supportsMethod(discovery, invocation[1] === '@' ? METHODS.mentions : METHODS.commands);
+      setLoadingOptions(canFetch);
       try {
         const query = invocation[2];
         const remote = invocation[1] === '@'
@@ -289,7 +330,9 @@ export function Composer({ client, state, models, lastModel, discovery, draftCac
         if (cancelled) return;
         setOptions(invocation[1] === '/' ? [...BUILT_INS.filter((item) => supportsMethod(discovery, item.name === 'stop' ? METHODS.stop : METHODS.createSideChat)).map((item) => ({ ...item, label: `/${item.name}`, value: `/${item.name}` })), ...remote] : remote);
         setActiveOption(0);
+        if (!cancelled) setOptionsLoaded(canFetch);
       } catch { if (!cancelled) setOptions([]); }
+      finally { if (!cancelled) setLoadingOptions(false); }
     }, 120);
     return () => { cancelled = true; clearTimeout(timer.current); };
   }, [discovery, invocation?.[0], invocation?.[2], client, suggestionsDismissed]);
@@ -318,9 +361,43 @@ export function Composer({ client, state, models, lastModel, discovery, draftCac
     setOptions([]);
   }
 
+  function releaseAudio() {
+    audioSessionRef.current += 1;
+    const recorder = recorderRef.current;
+    if (recorder) {
+      recorder.ondataavailable = null;
+      recorder.onstop = null;
+      recorder.onerror = null;
+      if (recorder.state !== 'inactive') recorder.stop();
+      recorderRef.current = null;
+    }
+    audioStreamRef.current?.getTracks().forEach((track) => track.stop());
+    audioStreamRef.current = null;
+  }
+
+  function closeRecorder() {
+    releaseAudio();
+    setAudioOpen(false);
+    setAudioPhase('idle');
+    setAudioBlob(null);
+    setAudioElapsed(0);
+  }
+
+  function chooseModel(item) {
+    setModel(item.id);
+    setReasoningEffort(item.reasoning?.includes(reasoningEffort) ? reasoningEffort : item.reasoning?.includes('medium') ? 'medium' : item.reasoning?.[0] ?? '');
+  }
+
+  async function handleFileChange(event) {
+    const input = event.currentTarget;
+    const files = Array.from(input.files ?? []);
+    await addFiles(files);
+    input.value = '';
+  }
+
   async function addFiles(files) {
-    if (!files.length || busy || pasteInFlight.current) return;
-    if (!supportsMethod(discovery, METHODS.send)) return onError(new Error('Attachments cannot be sent on this Avi instance.'));
+    if (!files.length || busy || pasteInFlight.current) return false;
+    if (!supportsMethod(discovery, METHODS.send)) { onError(new Error('Attachments cannot be sent on this Avi instance.')); return false; }
     pasteInFlight.current = true;
     setPasting(true);
     try {
@@ -337,7 +414,7 @@ export function Composer({ client, state, models, lastModel, discovery, draftCac
         });
         return { id: crypto.randomUUID(), name: file.name || 'Attachment', mime: file.type || 'application/octet-stream', size: file.size, kind: file.type.startsWith('image/') ? 'image_url' : 'file', source: 'clipboard', dataUrl };
       }));
-      if (!aliveRef.current) return;
+      if (!aliveRef.current) return false;
       const nextAttachments = [...existing, ...added];
       const draft = { ...latestDraftRef.current, attachments: nextAttachments };
       checkComposerPayload(draft);
@@ -345,7 +422,8 @@ export function Composer({ client, state, models, lastModel, discovery, draftCac
       dirtyRef.current = true;
       draftCache.set(conversation.id, { draft, dirty: true });
       setAttachments(nextAttachments);
-    } catch (error) { if (aliveRef.current) onError(error); }
+      return true;
+    } catch (error) { if (aliveRef.current) onError(error); return false; }
     finally { pasteInFlight.current = false; if (aliveRef.current) setPasting(false); }
   }
 
@@ -402,6 +480,14 @@ export function Composer({ client, state, models, lastModel, discovery, draftCac
   }, [compact]);
 
   const visibleOptions = invocation && !suggestionsDismissed ? options.slice(0, 12) : [];
+  const showOptionsStatus = invocation && !suggestionsDismissed && !visibleOptions.length && (loadingOptions || (optionsLoaded && invocation[2]));
+  const intelligenceSlider = hasModelSlider && <div class="intelligence-slider" style={{ '--slider-fill': `${sliderIndex / (sliderLevels.length - 1) * 100}%`, '--slider-offset': `${13 - 26 * sliderIndex / (sliderLevels.length - 1)}px` }}>
+    <div class="intelligence-dots" aria-hidden="true">{sliderLevels.map((level, index) => <span key={index} class={index <= sliderIndex ? 'filled' : undefined} />)}</div>
+    <input type="range" min="0" max={sliderLevels.length - 1} step="1" value={sliderIndex} aria-label="Intelligence level" aria-valuetext={`${models.find((item) => item.id === sliderLevels[sliderIndex].modelId)?.name ?? sliderLevels[sliderIndex].modelId} - ${sliderLevels[sliderIndex].reasoningEffort || 'Default'}`} onInput={(event) => {
+      const level = sliderLevels[Number(event.currentTarget.value)];
+      setModel(level.modelId); setReasoningEffort(level.reasoningEffort);
+    }} />
+  </div>;
   const queueSections = [
     { id: 'steer', label: 'Steer', description: 'Applied after the current assistant turn', icon: 'ri-corner-down-left-line', items: state.queue.steer },
     { id: 'queue', label: 'Queue', description: 'Sent after the assistant finishes', icon: 'ri-time-line', items: state.queue.queued },
@@ -457,9 +543,81 @@ export function Composer({ client, state, models, lastModel, discovery, draftCac
         <footer><span role="status">{queueBusy ? 'Updating queue...' : queueFeedback}</span>{queueError && <span role="alert">{queueError}</span>}</footer>
       </section>
     </div>, document.body)}
+    {modelSheetOpen && createPortal(<div class="queue-sheet-backdrop" onClick={(event) => { if (event.target === event.currentTarget) setModelSheetOpen(false); }}>
+      <section ref={modelDialogRef} class="queue-sheet model-sheet" role="dialog" aria-modal="true" aria-label="Choose model">
+        <header><strong>Model</strong><button type="button" aria-label="Close model picker" onClick={() => setModelSheetOpen(false)}><i class="ri-close-line" /></button></header>
+        <div class="queue-sheet-body">
+          {hasModelSlider && <section class="model-sheet-intelligence"><h3>Intelligence</h3>{intelligenceSlider}</section>}
+          <div class="model-sheet-options" role="radiogroup" aria-label="Models" onKeyDown={(event) => {
+            if (!['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) || !models.length) return;
+            event.preventDefault();
+            const index = models.findIndex((item) => item.id === model);
+            const next = event.key === 'Home' ? 0 : event.key === 'End' ? models.length - 1 : (index + (['ArrowUp', 'ArrowLeft'].includes(event.key) ? -1 : 1) + models.length) % models.length;
+            chooseModel(models[next]);
+            event.currentTarget.querySelectorAll('[role="radio"]')[next]?.focus();
+          }}>{models.map((item, index) => <button key={item.id} type="button" role="radio" aria-checked={item.id === model} tabIndex={item.id === model || (index === 0 && !selectedModel) ? 0 : -1} onClick={() => chooseModel(item)}>
+            <span><strong>{item.name ?? item.id}</strong>{item.id !== (item.name ?? item.id) && <small>{item.id}</small>}</span>{item.id === model && <i class="ri-check-line" />}
+          </button>)}</div>
+          {selectedModel?.reasoning?.length > 0 && <section class="model-sheet-effort"><h3>Effort</h3><div role="group" aria-label="Reasoning effort">{selectedModel.reasoning.map((effort) => <button key={effort} type="button" aria-pressed={effort === reasoningEffort} onClick={() => setReasoningEffort(effort)}>{effort}</button>)}</div></section>}
+        </div>
+      </section>
+    </div>, document.body)}
+    {audioOpen && createPortal(<div class="queue-sheet-backdrop" onClick={(event) => { if (event.target === event.currentTarget) closeRecorder(); }}>
+      <section ref={audioDialogRef} class="queue-sheet audio-recorder-sheet" role="dialog" aria-modal="true" aria-label="Record audio">
+        <header><strong>Record audio</strong><button type="button" aria-label="Close audio recorder" onClick={closeRecorder}><i class="ri-close-line" /></button></header>
+        <div class="queue-sheet-body">
+          <p class="recorder-timer" role="timer" aria-label="Recording duration">{String(Math.floor(audioElapsed / 60)).padStart(2, '0')}:{String(audioElapsed % 60).padStart(2, '0')}</p>
+          <button type="button" class={`recorder-control${audioPhase === 'recording' ? ' is-recording' : ''}`} aria-label={audioPhase === 'recording' ? 'Stop recording' : 'Start recording'} disabled={attachmentsDisabled || audioPhase === 'requesting' || audioPhase === 'stopping'} onClick={async () => {
+            if (audioPhase === 'recording') {
+              setAudioPhase('stopping');
+              recorderRef.current.stop();
+              audioStreamRef.current?.getTracks().forEach((track) => track.stop());
+              audioStreamRef.current = null;
+              return;
+            }
+            releaseAudio();
+            const session = audioSessionRef.current;
+            setAudioBlob(null);
+            setAudioElapsed(0);
+            setAudioPhase('requesting');
+            try {
+              const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+              if (session !== audioSessionRef.current) { stream.getTracks().forEach((track) => track.stop()); return; }
+              audioStreamRef.current = stream;
+              const mimeType = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'].find((mime) => window.MediaRecorder.isTypeSupported(mime));
+              if (!mimeType) throw new Error('This browser does not support MP4 or WebM audio recording.');
+              const recorder = new window.MediaRecorder(stream, { mimeType });
+              recorderRef.current = recorder;
+              const chunks = [];
+              recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+              recorder.onstop = () => {
+                stream.getTracks().forEach((track) => track.stop());
+                if (session !== audioSessionRef.current) return;
+                setAudioBlob(new window.Blob(chunks, { type: recorder.mimeType || mimeType }));
+                setAudioPhase('recorded');
+                audioStreamRef.current = null;
+              };
+              recorder.onerror = () => { closeRecorder(); onError(new Error('Audio recording failed. Please try again.')); };
+              recorder.start();
+              setAudioPhase('recording');
+            } catch (error) {
+              if (session !== audioSessionRef.current) return;
+              closeRecorder();
+              onError(new Error(error.name === 'NotAllowedError' ? 'Microphone access was denied. Allow microphone access in your browser settings to record audio.' : error.name === 'NotFoundError' ? 'No microphone was found on this device.' : error.message || 'Could not start audio recording.'));
+            }
+          }}><i class={audioPhase === 'requesting' || audioPhase === 'stopping' ? 'ri-loader-4-line spinning' : audioPhase === 'recording' ? 'ri-stop-fill' : 'ri-mic-line'} /></button>
+          <p role="status">{audioPhase === 'requesting' ? 'Waiting for microphone access...' : audioPhase === 'recording' ? 'Recording...' : audioPhase === 'stopping' ? 'Finishing recording...' : audioPhase === 'recorded' ? 'Recording ready' : 'Tap to record'}</p>
+        </div>
+        <footer><button type="button" onClick={closeRecorder}>Cancel</button><button type="button" disabled={attachmentsDisabled || audioPhase !== 'recorded' || !audioBlob?.size} onClick={async () => {
+          const file = new window.File([audioBlob], `recording-${Date.now()}.${audioBlob.type.startsWith('audio/mp4') ? 'm4a' : 'webm'}`, { type: audioBlob.type });
+          if (await addFiles([file])) closeRecorder();
+        }}>Use recording</button></footer>
+      </section>
+    </div>, document.body)}
     <form class="composer" onSubmit={submit}>
       {visibleOptions.length > 0 && <div id="composer-suggestions" class="command-picker" role="listbox" aria-label="Composer suggestions">{visibleOptions.map((option, index) => <button key={`${option.value}-${index}`} id={`composer-option-${index}`} type="button" role="option" aria-selected={index === activeOption} tabIndex={-1} onMouseEnter={() => setActiveOption(index)} onMouseDown={(event) => event.preventDefault()} onClick={() => choose(option)}><strong>{option.label}</strong><small>{option.description ?? option.type}</small></button>)}</div>}
-      {attachments.length > 0 && <div class="composer-markers">{attachments.map((attachment) => <span key={attachment.id}><i class={attachment.markerType === 'skill' ? 'ri-sparkling-line' : attachment.markerType === 'workflow' ? 'ri-flow-chart' : 'ri-file-line'} />{attachment.kind === 'image_url' && attachment.dataUrl?.startsWith('data:image/') && <img src={attachment.dataUrl} alt={attachment.name} width="32" height="32" />}<span>{attachment.name}</span><button type="button" disabled={busy || pasting} aria-label={`Remove ${attachment.name}`}  onClick={() => setAttachments((current) => current.filter((item) => item.id !== attachment.id))}><i class="ri-close-line" /></button></span>)}</div>}
+      {showOptionsStatus && <div class="command-picker"><div class="command-picker-status" role="status">{loadingOptions && <i class="ri-loader-4-line spinning" />}{loadingOptions ? 'Searching...' : 'No matches'}</div></div>}
+      {attachments.length > 0 && <div class="composer-markers">{attachments.map((attachment) => <span key={attachment.id}><i class={attachment.markerType === 'skill' ? 'ri-sparkling-line' : attachment.markerType === 'workflow' ? 'ri-flow-chart' : attachment.mime?.startsWith('audio/') ? 'ri-mic-line' : attachment.mime?.startsWith('video/') ? 'ri-video-line' : 'ri-file-line'} />{attachment.kind === 'image_url' && attachment.dataUrl?.startsWith('data:image/') && <img src={attachment.dataUrl} alt={attachment.name} width="32" height="32" />}<span>{attachment.name}</span><button type="button" disabled={busy || pasting} aria-label={`Remove ${attachment.name}`}  onClick={() => setAttachments((current) => current.filter((item) => item.id !== attachment.id))}><i class="ri-close-line" /></button></span>)}</div>}
       <textarea role="combobox" aria-label="Message Avi" aria-autocomplete="list" aria-haspopup="listbox" aria-controls={visibleOptions.length ? 'composer-suggestions' : undefined} aria-expanded={visibleOptions.length > 0} aria-activedescendant={visibleOptions.length ? `composer-option-${activeOption}` : undefined} placeholder={workMode === 'goal' ? 'Describe the Goal...' : workMode === 'plan' ? 'Describe your task to generate a plan...' : ultraMode ? 'Describe the objective for the Ultra team...' : 'Message Avi...  @ files  $ skills  / commands'} value={text} disabled={busy || pasting} onPaste={async (event) => {
         const files = Array.from(event.clipboardData?.files ?? []);
         if (!files.length) return;
@@ -484,33 +642,37 @@ export function Composer({ client, state, models, lastModel, discovery, draftCac
           event.currentTarget.form.requestSubmit();
         }
       }} />
-      <input ref={fileInput} type="file" multiple hidden aria-label="Attach files" disabled={busy || pasting || !supportsMethod(discovery, METHODS.send)} onChange={async (event) => {
-        const files = Array.from(event.currentTarget.files ?? []);
-        event.currentTarget.value = '';
-        await addFiles(files);
-      }} />
+      <input ref={fileInput} type="file" multiple hidden aria-label="Attach files" disabled={attachmentsDisabled} onChange={handleFileChange} />
+      {mobile && <>
+        <input ref={photoInput} type="file" accept="image/*,video/*" multiple hidden aria-label="Photo library" disabled={attachmentsDisabled} onChange={handleFileChange} />
+        <input ref={cameraInput} type="file" accept="image/*" capture="environment" hidden aria-label="Take photo" disabled={attachmentsDisabled} onChange={handleFileChange} />
+        <input ref={videoInput} type="file" accept="video/*" capture="environment" hidden aria-label="Record video" disabled={attachmentsDisabled} onChange={handleFileChange} />
+      </>}
       <footer>
         <div class="composer-controls">
-          <div class="composer-menu-holder"><button type="button" class="round-control" aria-label="Composer actions" aria-haspopup="menu" aria-expanded={openMenu === 'plus'} onClick={() => setOpenMenu(openMenu === 'plus' ? null : 'plus')}><i class="ri-add-line" /></button>{openMenu === 'plus' && <div class="composer-menu plus-menu" role="menu"><button type="button" role="menuitem" disabled={busy || pasting || !supportsMethod(discovery, METHODS.send)} title="Attach files (up to 10 MB per file)" onClick={() => { fileInput.current?.click(); setOpenMenu(null); }}><i class="ri-attachment-2" />Attach files</button><button type="button" role="menuitemcheckbox" aria-checked={ultraMode} onClick={() => { setUltraMode(!ultraMode); setWorkMode(null); setOpenMenu(null); }}><i class="ri-flashlight-line" />Ultra</button><button type="button" role="menuitemcheckbox" aria-checked={workMode === 'goal'} onClick={() => { setWorkMode(workMode === 'goal' ? null : 'goal'); setUltraMode(false); setOpenMenu(null); }}><i class="ri-focus-3-line" />Goal</button><button type="button" role="menuitemcheckbox" aria-checked={workMode === 'plan'} onClick={() => { setWorkMode(workMode === 'plan' ? null : 'plan'); setUltraMode(false); setOpenMenu(null); }}><i class="ri-list-check-3" />Plan</button><button type="button" role="menuitem" disabled={!supportsMethod(discovery, METHODS.createSideChat)} onClick={() => { setOpenMenu(null); Promise.resolve().then(onSideChat).catch(onError); }}><i class="ri-chat-new-line" />Side chat</button><span class="mobile-permission-label">Permission</span><div class="mobile-permission-options">{PERMISSIONS.map((item) => <button key={item.id} type="button" role="menuitemradio" aria-checked={item.id === permissionMode} onClick={() => { setPermissionMode(item.id); setOpenMenu(null); }}><i class={item.icon} /><span><strong>{item.label}</strong><small>{item.description}</small></span></button>)}</div></div>}</div>
+          <div class="composer-menu-holder"><button ref={plusTriggerRef} type="button" class="round-control" aria-label="Composer actions" aria-haspopup="menu" aria-expanded={openMenu === 'plus'} onClick={() => setOpenMenu(openMenu === 'plus' ? null : 'plus')}><i class="ri-add-line" /></button>{openMenu === 'plus' && <div class="composer-menu plus-menu" role="menu"><button type="button" role="menuitem" disabled={busy || pasting || !supportsMethod(discovery, METHODS.send)} title="Attach files (up to 10 MB per file)" onClick={() => { fileInput.current?.click(); setOpenMenu(null); }}><i class="ri-attachment-2" />Attach files</button>{mobile && <>
+            <button type="button" role="menuitem" disabled={attachmentsDisabled} onClick={() => { photoInput.current?.click(); setOpenMenu(null); }}><i class="ri-image-line" />Photo library</button>
+            <button type="button" role="menuitem" disabled={attachmentsDisabled} onClick={() => { cameraInput.current?.click(); setOpenMenu(null); }}><i class="ri-camera-line" />Take photo</button>
+            <button type="button" role="menuitem" disabled={attachmentsDisabled} onClick={() => { videoInput.current?.click(); setOpenMenu(null); }}><i class="ri-video-line" />Record video</button>
+            {canRecordAudio && <button type="button" role="menuitem" disabled={attachmentsDisabled} onClick={() => { setOpenMenu(null); root.current?.querySelector('textarea')?.blur(); setAudioOpen(true); }}><i class="ri-mic-line" />Record audio</button>}
+          </>}<button type="button" role="menuitemcheckbox" aria-checked={ultraMode} onClick={() => { setUltraMode(!ultraMode); setWorkMode(null); setOpenMenu(null); }}><i class="ri-flashlight-line" />Ultra</button><button type="button" role="menuitemcheckbox" aria-checked={workMode === 'goal'} onClick={() => { setWorkMode(workMode === 'goal' ? null : 'goal'); setUltraMode(false); setOpenMenu(null); }}><i class="ri-focus-3-line" />Goal</button><button type="button" role="menuitemcheckbox" aria-checked={workMode === 'plan'} onClick={() => { setWorkMode(workMode === 'plan' ? null : 'plan'); setUltraMode(false); setOpenMenu(null); }}><i class="ri-list-check-3" />Plan</button><button type="button" role="menuitem" disabled={!supportsMethod(discovery, METHODS.createSideChat)} onClick={() => { setOpenMenu(null); Promise.resolve().then(onSideChat).catch(onError); }}><i class="ri-chat-new-line" />Side chat</button><span class="mobile-permission-label">Permission</span><div class="mobile-permission-options">{PERMISSIONS.map((item) => <button key={item.id} type="button" role="menuitemradio" aria-checked={item.id === permissionMode} onClick={() => { setPermissionMode(item.id); setOpenMenu(null); }}><i class={item.icon} /><span><strong>{item.label}</strong><small>{item.description}</small></span></button>)}</div></div>}</div>
           <div class="composer-menu-holder permission-control"><button type="button" class="control-chip" aria-haspopup="menu" aria-expanded={openMenu === 'permission'} onClick={() => setOpenMenu(openMenu === 'permission' ? null : 'permission')}><i class={permission.icon} /><span>{permission.label}</span><i class="ri-arrow-down-s-line" /></button>{openMenu === 'permission' && <div class="composer-menu permission-menu" role="menu">{PERMISSIONS.map((item) => <button key={item.id} type="button" role="menuitemradio" aria-checked={item.id === permissionMode} onClick={() => { setPermissionMode(item.id); setOpenMenu(null); }}><i class={item.icon} /><span><strong>{item.label}</strong><small>{item.description}</small></span></button>)}</div>}</div>
           {workMode && <button type="button" class="mode-chip" onClick={() => setWorkMode(null)}><i class={workMode === 'goal' ? 'ri-focus-3-line' : 'ri-list-check-3'} />{workMode === 'goal' ? 'Goal' : 'Plan'}<i class="ri-close-line" /></button>}
           {ultraMode && <button type="button" class="mode-chip" onClick={() => setUltraMode(false)}><i class="ri-flashlight-line" />Ultra<i class="ri-close-line" /></button>}
         </div>
         <div class="composer-submit-row">
-          <span class={`composer-save-status is-${saveStatus}`} role="status">{pasting ? 'Reading attachments...' : saveStatus === 'saving' ? 'Saving...' : saveStatus === 'saved' ? 'Saved' : saveStatus === 'unsynced' ? 'Not synced; keep this tab open' : saveStatus === 'pending' ? 'Waiting to sync' : 'Draft only in this tab'}{saveStatus === 'unsynced' && <button type="button" class="composer-save-retry" onClick={retrySave}>Retry</button>}</span>
+          <span class={`composer-save-status is-${saveStatus}`} role="status">{pasting ? 'Reading attachments...' : busy ? client.status?.status === 'online' ? 'Sending...' : 'Waiting for connection...' : saveStatus === 'saving' ? 'Saving...' : saveStatus === 'saved' ? 'Saved' : saveStatus === 'unsynced' ? 'Not synced; keep this tab open' : saveStatus === 'pending' ? 'Waiting to sync' : 'Draft only in this tab'}{!busy && !pasting && saveStatus === 'unsynced' && <button type="button" class="composer-save-retry" onClick={retrySave}>Retry</button>}</span>
           <div class="composer-menu-holder model-menu-holder">
-            <button type="button" class="model-chip" aria-haspopup={hasModelSlider ? 'dialog' : 'menu'} aria-expanded={openMenu === 'model'} onClick={() => { setOpenMenu(openMenu === 'model' ? null : 'model'); setModelSubmenu(null); setAdvancedPickerOpen(false); }}><span>{selectedModel?.name ?? model}</span>{reasoningEffort && <small> - {reasoningEffort}</small>}<i class="ri-arrow-down-s-line" /></button>
-            {openMenu === 'model' && hasModelSlider && !advancedPickerOpen && <div class="composer-menu model-menu intelligence-menu" role="dialog" aria-label="Choose intelligence level" onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setOpenMenu(null); root.current?.querySelector('.model-chip')?.focus(); } }}>
-              <div class="intelligence-slider" style={{ '--slider-fill': `${sliderIndex / (sliderLevels.length - 1) * 100}%`, '--slider-offset': `${13 - 26 * sliderIndex / (sliderLevels.length - 1)}px` }}>
-                <div class="intelligence-dots" aria-hidden="true">{sliderLevels.map((level, index) => <span key={index} class={index <= sliderIndex ? 'filled' : undefined} />)}</div>
-                <input type="range" min="0" max={sliderLevels.length - 1} step="1" value={sliderIndex} aria-label="Intelligence level" aria-valuetext={`${models.find((item) => item.id === sliderLevels[sliderIndex].modelId)?.name ?? sliderLevels[sliderIndex].modelId} - ${sliderLevels[sliderIndex].reasoningEffort || 'Default'}`} onInput={(event) => {
-                  const level = sliderLevels[Number(event.currentTarget.value)];
-                  setModel(level.modelId); setReasoningEffort(level.reasoningEffort);
-                }} />
-              </div>
+            <button ref={modelTriggerRef} type="button" class="model-chip" aria-haspopup={mobile || hasModelSlider ? 'dialog' : 'menu'} aria-expanded={mobile ? modelSheetOpen : openMenu === 'model'} onClick={() => {
+              if (mobile) { root.current?.querySelector('textarea')?.blur(); setOpenMenu(null); setModelSheetOpen(true); }
+              else setOpenMenu(openMenu === 'model' ? null : 'model');
+              setModelSubmenu(null); setAdvancedPickerOpen(false);
+            }}><span class="model-chip-label"><i class="ri-cpu-line" /><strong>{selectedModel?.name ?? model}</strong>{reasoningEffort && <small>{reasoningEffort}</small>}</span><i class="ri-arrow-down-s-line" /></button>
+            {!mobile && openMenu === 'model' && hasModelSlider && !advancedPickerOpen && <div class="composer-menu model-menu intelligence-menu" role="dialog" aria-label="Choose intelligence level" onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setOpenMenu(null); root.current?.querySelector('.model-chip')?.focus(); } }}>
+              {intelligenceSlider}
               <button type="button" class="model-reasoning-trigger" onClick={() => setAdvancedPickerOpen(true)}><span>Advanced</span><i class="ri-arrow-right-s-line" /></button>
             </div>}
-            {openMenu === 'model' && (!hasModelSlider || advancedPickerOpen) && <div class="composer-menu model-menu" role="menu" aria-label="Advanced model settings" onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setOpenMenu(null); setModelSubmenu(null); } }}>
+            {!mobile && openMenu === 'model' && (!hasModelSlider || advancedPickerOpen) && <div class="composer-menu model-menu" role="menu" aria-label="Advanced model settings" onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setOpenMenu(null); setModelSubmenu(null); } }}>
               <header class="advanced-menu-header"><span>Advanced</span><i class="ri-arrow-down-s-line" /></header>
               <div ref={modelHolderRef} class="model-submenu-holder" onMouseEnter={() => setModelSubmenu('model')} onMouseLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setModelSubmenu(null); }} onFocus={() => setModelSubmenu('model')} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setModelSubmenu(null); }} onKeyDown={(event) => { if (event.key === 'ArrowRight') { event.preventDefault(); setModelSubmenu('model'); queueMicrotask(() => event.currentTarget.querySelector('.model-reasoning-submenu button')?.focus()); } else if (event.key === 'ArrowLeft') { event.preventDefault(); setModelSubmenu(null); event.currentTarget.querySelector('.model-reasoning-trigger')?.focus(); } }}>
                 <button type="button" class="model-reasoning-trigger" role="menuitem" aria-label="Choose model" aria-haspopup="menu" aria-expanded={modelSubmenu === 'model'} onClick={() => setModelSubmenu(modelSubmenu === 'model' ? null : 'model')}><span>Model</span><span>{selectedModel?.name ?? model}<i class="ri-arrow-right-s-line" /></span></button>
@@ -522,7 +684,7 @@ export function Composer({ client, state, models, lastModel, discovery, draftCac
               </div>}
             </div>}
           </div>
-          {state.run.active ? <button type="button" class="send" aria-label="Stop" disabled={!supportsMethod(discovery, METHODS.stop)} onClick={() => Promise.resolve(onStop()).catch(onError)}><i class="ri-stop-fill" /></button> : <button type="submit" class="send" aria-label="Send" title={supportsMethod(discovery, METHODS.send) ? undefined : 'Sending is not available on this Avi instance.'} disabled={busy || pasting || !supportsMethod(discovery, METHODS.send) || (!text.trim() && attachments.length === 0) || !model}><i class="ri-arrow-up-line" /></button>}
+          {state.run.active && !busy ? <button type="button" class="send" aria-label="Stop" disabled={!supportsMethod(discovery, METHODS.stop)} onClick={() => Promise.resolve(onStop()).catch(onError)}><i class="ri-stop-fill" /></button> : <button type="submit" class={`send${busy ? ' is-sending' : ''}`} aria-label="Send" title={supportsMethod(discovery, METHODS.send) ? undefined : 'Sending is not available on this Avi instance.'} disabled={busy || pasting || !supportsMethod(discovery, METHODS.send) || (!text.trim() && attachments.length === 0) || !model}><i class={busy ? 'ri-loader-4-line spinning' : 'ri-arrow-up-line'} /></button>}
         </div>
       </footer>
     </form>

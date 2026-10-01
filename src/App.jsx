@@ -188,12 +188,14 @@ export function App() {
     const resume = () => {
       if (document.visibilityState === 'hidden') return;
       const current = sessionRef.current;
-      if (current && !current.client.closed) current.client.connectUntilReady().then(() => refresh()).catch(() => {});
+      if (current && !current.client.closed) current.client.resume().then(() => refresh()).catch(() => {});
     };
     window.addEventListener('online', resume);
+    window.addEventListener('pageshow', resume);
     document.addEventListener('visibilitychange', resume);
     return () => {
       window.removeEventListener('online', resume);
+      window.removeEventListener('pageshow', resume);
       document.removeEventListener('visibilitychange', resume);
     };
   }, []);

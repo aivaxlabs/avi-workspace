@@ -102,6 +102,9 @@ export function WorkspacePage({ connection, globalClient, discovery, models, las
   const [client, setClient] = useState(null);
   const [conversationDiscovery, setConversationDiscovery] = useState(null);
   const [conversationConnectionProblem, setConversationConnectionProblem] = useState(false);
+  const [conversationStatus, setConversationStatus] = useState('checking');
+  const [loadingConversation, setLoadingConversation] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const recoverRef = useRef(null);
   const [history, setHistory] = useState({ hasMore: false, nextCursor: null });
@@ -192,9 +195,12 @@ export function WorkspacePage({ connection, globalClient, discovery, models, las
     const socket = new RpcClient({ url: connection.relay ? undefined : toWebSocketUrl(connection.serverUrl, conversationSocketPath(selectedId)), relay: connection.relay, path: conversationSocketPath(selectedId), apiKey: connection.apiKey });
     setConversationDiscovery(null);
     setConversationConnectionProblem(false);
+    setConversationStatus('checking');
+    setLoadingConversation(true);
     let refreshFailures = 0;
     let active = true;
     let recovering = false;
+    let recoverAgain = false;
     let recoveryAttempt = 0;
     let recoveryTimer = null;
     let projectionTimer = null;
@@ -202,7 +208,11 @@ export function WorkspacePage({ connection, globalClient, discovery, models, las
     let bufferedEvents = [];
     let recoveredOnce = false;
     async function recover() {
-      if (recovering || !active || socket.closed) return;
+      if (!active || socket.closed) return;
+      if (recovering) {
+        recoverAgain = true;
+        return;
+      }
       clearTimeout(recoveryTimer);
       recoveryTimer = null;
       recovering = true;
@@ -223,6 +233,7 @@ export function WorkspacePage({ connection, globalClient, discovery, models, las
         setState(recovered);
         if (!recoveredOnce) setHistory(normalizeMessagePage(context.messagePage ?? { messages: context.messages, hasMore: false }));
         recoveredOnce = true;
+        setLoadingConversation(false);
         recoveryAttempt = 0;
         refreshFailures = 0;
         setConversationConnectionProblem(false);
@@ -238,7 +249,13 @@ export function WorkspacePage({ connection, globalClient, discovery, models, las
           const delay = Math.min(1_000 * (2 ** recoveryAttempt++), 15_000);
           if (!socket.closed) recoveryTimer = setTimeout(recover, delay);
         }
-      } finally { recovering = false; }
+      } finally {
+        recovering = false;
+        if (recoverAgain) {
+          recoverAgain = false;
+          recover();
+        }
+      }
     }
     async function refreshProjection() {
       if (!active || recovering || projectionRefreshing || socket.closed || socket.status.status !== 'online') return;
@@ -269,18 +286,23 @@ export function WorkspacePage({ connection, globalClient, discovery, models, las
         if (next.recoveryRequired) recover();
       }
     });
+    socket.addEventListener('stale-event', () => {
+      if (active) recover();
+    });
     socket.addEventListener('status', (event) => {
       if (!active) return;
       setConversationConnectionProblem(event.detail.problem);
+      setConversationStatus(event.detail.status);
       if (event.detail.status === 'online') {
         if (!projectionTimer) projectionTimer = setInterval(refreshProjection, 5_000);
       }
     });
     recoverRef.current = recover;
     const resume = () => {
-      if (document.visibilityState !== 'hidden' && !socket.closed) socket.connectUntilReady().then(recover).catch(() => {});
+      if (document.visibilityState !== 'hidden' && !socket.closed) socket.resume().then(recover).catch(() => {});
     };
     window.addEventListener('online', resume);
+    window.addEventListener('pageshow', resume);
     document.addEventListener('visibilitychange', resume);
     socket.connectUntilReady().catch(() => {});
     setClient(socket);
@@ -290,6 +312,7 @@ export function WorkspacePage({ connection, globalClient, discovery, models, las
       clearTimeout(recoveryTimer);
       clearInterval(projectionTimer);
       window.removeEventListener('online', resume);
+      window.removeEventListener('pageshow', resume);
       document.removeEventListener('visibilitychange', resume);
       socket.close();
       setClient(null);
@@ -355,7 +378,9 @@ export function WorkspacePage({ connection, globalClient, discovery, models, las
     } catch (value) { setError(value.message); }
   }
   async function createConversation(folder) {
-    if (!supportsMethod(discovery, METHODS.createConversation)) return;
+    if (!supportsMethod(discovery, METHODS.createConversation) || creating) return;
+    setCreating(true);
+    setNavigationOpen(false);
     try {
       const catalog = normalizeModelsResult(await globalClient.request(METHODS.models));
       const defaultModel = [catalog.lastModel, catalog.models[0]?.id].find((id) => catalog.models.some((model) => model.id === id));
@@ -363,6 +388,7 @@ export function WorkspacePage({ connection, globalClient, discovery, models, las
       await onRefresh(item);
       selectConversation(item.id);
     } catch (value) { setError(value.message); }
+    finally { setCreating(false); }
   }
   async function runSidebarAction(method, params, selectResult = null) {
     try {
@@ -416,6 +442,7 @@ export function WorkspacePage({ connection, globalClient, discovery, models, las
     onUpdateBot: supportsMethod(discovery, METHODS.updateBot) ? (bot, changes) => runSidebarAction(METHODS.updateBot, { id: bot.id, changes }) : undefined,
   };
   const attentionCount = state.approvals.length + state.questions.length;
+  const channelState = connectionStatus?.status !== 'online' ? connectionStatus?.status ?? 'offline' : !selectedId ? 'online' : conversationStatus === 'online' && loadingConversation ? 'checking' : conversationStatus;
   const selectedConversation = conversations.find((item) => item.id === selectedId);
   const conversationTitle = state.conversation?.title ?? selectedConversation?.title ?? 'Start a conversation';
   const conversationFolder = state.conversation?.projectName ?? selectedConversation?.projectName ?? state.conversation?.projectDisplayPath ?? selectedConversation?.projectDisplayPath ?? 'Chats';
@@ -464,6 +491,8 @@ export function WorkspacePage({ connection, globalClient, discovery, models, las
         <div class="workspace-heading"><strong title={conversationTitle}>{conversationTitle}</strong><small title={conversationFolder}>{conversationFolder}</small></div>
         <button ref={panelButtonRef} aria-label={panelOpen ? 'Close auxiliary panel' : 'Open auxiliary panel'} aria-haspopup={mobile ? 'dialog' : undefined} aria-expanded={panelOpen} onClick={() => { setPanelOpen(!panelOpen); if (attentionCount) setPanelTab('permissions'); }}><i class="ri-layout-right-line" />{attentionCount > 0 && <b>{attentionCount}</b>}</button>
       </header>
+      {channelState !== 'online' && !(refreshError || connectionStatus?.problem || conversationConnectionProblem) && <div class={`workspace-connection-strip is-${channelState}`} role="status" aria-live="polite"><i class={channelState === 'offline' ? 'ri-signal-wifi-off-line' : 'ri-loader-4-line spinning'} aria-hidden="true" /><span>{channelState === 'offline' ? 'Disconnected · reconnecting automatically' : connectionStatus?.status !== 'online' ? 'Connecting to Avi...' : 'Opening conversation...'}</span></div>}
+      {creating && <div class="workspace-connection-strip is-checking" role="status" aria-live="polite"><i class="ri-loader-4-line spinning" aria-hidden="true" /><span>Creating chat...</span></div>}
       {(refreshError || connectionStatus?.problem || conversationConnectionProblem) && <div class="workspace-connection-alert" role="status"><span>We are having connection problems. Your work is still here. {globalClient?.closed || client?.closed ? 'Retry the connection; check your sign-in or server settings if it keeps failing.' : 'Reconnecting automatically...'}</span><button disabled={retrying} onClick={async () => {
         setRetrying(true);
         try {
@@ -489,12 +518,12 @@ export function WorkspacePage({ connection, globalClient, discovery, models, las
       }}>{history.hasMore && <button class="load-older" title={!supportsMethod(conversationDiscovery, METHODS.conversationMessages) ? 'Earlier messages are not available on this Avi instance.' : undefined} disabled={loadingOlder || !supportsMethod(conversationDiscovery, METHODS.conversationMessages)} onClick={older}>{loadingOlder ? 'Loading...' : 'Load earlier messages'}</button>}{groupedMessages.length ? <div class="messages-column">{groupedMessages.map(({ message, workedMessages, workedStartedAt }) => <RichMessage key={message.id} message={message} workedMessages={workedMessages} workedStartedAt={workedStartedAt} client={client} discovery={conversationDiscovery} onFork={supportsMethod(discovery, METHODS.forkConversation) ? async (messageId) => {
         const result = await runSidebarAction(METHODS.forkConversation, { payload: { conversationId: selectedId, throughMessageId: messageId } }, (value) => value?.conversation?.id);
         if (!result?.conversation?.id) throw new Error('Avi could not fork this conversation.');
-      } : undefined} />)}</div> : <div class="empty-chat"><span class="avi-mark large"><img src="avi.png" alt="" width="34" height="34" /></span><h1>{conversationTitle}</h1><p>Remote state stays authoritative on {connection.label}.</p></div>}</div>
+      } : undefined} />)}</div> : loadingConversation && selectedId ? <div class="conversation-skeleton" aria-hidden="true"><span /><span /><span /></div> : <div class="empty-chat"><span class="avi-mark large"><img src="avi.png" alt="" width="34" height="34" /></span><h1>{conversationTitle}</h1><p>Remote state stays authoritative on {connection.label}.</p></div>}</div>
       {awayFromBottom && <button type="button" class="scroll-to-bottom" aria-label="Scroll to latest message" title="Scroll to latest message" onClick={() => scrollToBottom('smooth')}><i class="ri-arrow-down-line" /></button>}
       {client && state.conversation && <Composer key={state.conversation.id} client={client} state={state} discovery={conversationDiscovery} draftCache={savedWorkspace.drafts} models={models} lastModel={lastModel} intelligenceLevels={intelligenceLevels} messageDeliveryMode={messageDeliveryMode} compact={mobile && mobileComposerCompact} onExpand={() => {
         setMobileComposerCompact(false);
         requestAnimationFrame(() => composerWrapRef.current?.querySelector('textarea')?.focus());
-      }} onSent={() => onRefresh().catch(() => {})} onStop={() => client.request(METHODS.stop)} onSideChat={createSideChat} onOpenTasks={() => { setPanelTab('tasks'); setPanelOpen(true); }} onOpenAgents={() => { setPanelTab('agents'); setPanelOpen(true); }} onQueueOrder={applyQueueResult} onError={(value) => setError(value.message)} composerRef={composerWrapRef} />}
+      }} mobile={mobile} onSent={() => onRefresh().catch(() => {})} onStop={() => client.request(METHODS.stop)} onSideChat={createSideChat} onOpenTasks={() => { setPanelTab('tasks'); setPanelOpen(true); }} onOpenAgents={() => { setPanelTab('agents'); setPanelOpen(true); }} onQueueOrder={applyQueueResult} onError={(value) => setError(value.message)} composerRef={composerWrapRef} />}
     </section>
     {mobile && navigationOpen && <div ref={navigationDialogRef} class="mobile-navigation-layer">
       <div class="mobile-drawer" role="dialog" aria-modal="true" aria-label="Navigation"><ConversationSidebar {...sidebarProps} collapsed={false} onClose={closeNavigation} /></div>

@@ -210,6 +210,279 @@ test('keeps the full picker when fewer than three configured models are availabl
   view.unmount();
 });
 
+describe('mobile composer', () => {
+  test('opens the model sheet, preserves supported effort and restores focus', () => {
+    const view = mount(createState(), { mobile: true, intelligenceLevels: [
+      { modelId: 'model:one', reasoningEffort: 'low' },
+      { modelId: 'model:one', reasoningEffort: 'high' },
+      { modelId: 'model:two', reasoningEffort: 'medium' },
+    ] });
+    try {
+      const chip = view.root.querySelector('.model-chip');
+      act(() => chip.click());
+      const sheet = document.querySelector('[role="dialog"][aria-label="Choose model"]');
+      expect(sheet?.getAttribute('aria-modal')).toBe('true');
+      expect(view.root.querySelector('[aria-label="Choose model"]')).toBeNull();
+      expect(sheet.querySelector('.intelligence-slider input')).not.toBeNull();
+      expect(sheet.querySelectorAll('[role="radio"]')).toHaveLength(2);
+      act(() => buttonWithText(sheet, 'Model Two').click());
+      expect(chip.textContent).toContain('Model Two');
+      expect(chip.textContent).toContain('high');
+      expect(sheet.querySelector('[role="radio"][aria-checked="true"]').textContent).toContain('model:two');
+      act(() => buttonWithText(sheet, 'medium').click());
+      expect(chip.textContent).toContain('medium');
+      act(() => buttonWithText(sheet, 'Model One').click());
+      expect(chip.textContent).toContain('low');
+      act(() => buttonWithText(sheet, 'Model Two').click());
+      expect(chip.textContent).toContain('medium');
+      act(() => sheet.querySelector('[role="radio"][aria-checked="true"]').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true })));
+      expect(chip.textContent).toContain('Model One');
+      expect(document.activeElement === sheet.querySelector('[role="radio"][aria-checked="true"]')).toBe(true);
+      act(() => document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape' })));
+      expect(document.querySelector('.model-sheet')).toBeNull();
+      expect(document.activeElement === chip).toBe(true);
+      act(() => chip.click());
+      act(() => document.querySelector('.queue-sheet-backdrop').click());
+      expect(document.querySelector('.model-sheet')).toBeNull();
+    } finally { view.unmount(); }
+  });
+
+  test('exposes native photo and video inputs without unsupported audio recording', async () => {
+    const recorder = window.MediaRecorder;
+    window.MediaRecorder = undefined;
+    const view = mount(createState(), { mobile: true });
+    try {
+      act(() => view.root.querySelector('[aria-label="Composer actions"]').click());
+      const menu = view.root.querySelector('.plus-menu');
+      for (const label of ['Photo library', 'Take photo', 'Record video']) expect(buttonWithText(menu, label)).toBeTruthy();
+      expect(buttonWithText(menu, 'Record audio')).toBeUndefined();
+      const photos = view.root.querySelector('input[aria-label="Photo library"]');
+      const camera = view.root.querySelector('input[aria-label="Take photo"]');
+      const video = view.root.querySelector('input[aria-label="Record video"]');
+      expect(photos.accept).toBe('image/*,video/*');
+      expect(photos.multiple).toBe(true);
+      expect(photos.hasAttribute('capture')).toBe(false);
+      expect(camera.accept).toBe('image/*');
+      expect(camera.getAttribute('capture')).toBe('environment');
+      expect(video.accept).toBe('video/*');
+      expect(video.getAttribute('capture')).toBe('environment');
+      expect([photos, camera, video].every((input) => input.hidden)).toBe(true);
+      Object.defineProperty(video, 'files', { value: [new window.File(['video'], 'clip.mp4', { type: 'video/mp4' })] });
+      await act(async () => { video.dispatchEvent(new window.Event('change', { bubbles: true })); await new Promise((resolve) => setTimeout(resolve, 30)); });
+      expect(video.value).toBe('');
+      expect(view.draftCache.get('thread-1').draft.attachments.at(-1)).toMatchObject({ kind: 'file', mime: 'video/mp4', name: 'clip.mp4' });
+      expect(view.root.querySelector('.composer-markers .ri-video-line')).not.toBeNull();
+      view.rerender(createState(), { discovery: discoveryWithout('send') });
+      expect([photos, camera, video].every((input) => input.disabled)).toBe(true);
+      expect(buttonWithText(menu, 'Take photo').disabled).toBe(true);
+    } finally { view.unmount(); window.MediaRecorder = recorder; }
+  });
+
+  test.each(['audio/mp4', 'audio/webm;codecs=opus'])('records %s as a file attachment and releases the microphone', async (mime) => {
+    const originalRecorder = window.MediaRecorder;
+    const mediaDevices = Object.getOwnPropertyDescriptor(navigator, 'mediaDevices');
+    let trackStops = 0;
+    const stream = { getTracks: () => [{ stop: () => { trackStops += 1; } }] };
+    const supportedChecks = [];
+    window.MediaRecorder = class {
+      static isTypeSupported(type) { supportedChecks.push(type); return type === mime; }
+      constructor(_stream, options) { this.mimeType = options.mimeType; this.state = 'inactive'; }
+      start() { this.state = 'recording'; }
+      stop() {
+        this.state = 'inactive';
+        queueMicrotask(() => {
+          this.ondataavailable?.({ data: new window.Blob(['recorded audio'], { type: this.mimeType }) });
+          this.onstop?.();
+        });
+      }
+    };
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: async () => stream } });
+    const view = mount(createState({ composer: { ...createState().composer, attachments: [] } }), { mobile: true });
+    try {
+      const plus = view.root.querySelector('[aria-label="Composer actions"]');
+      act(() => plus.click());
+      act(() => buttonWithText(view.root.querySelector('.plus-menu'), 'Record audio').click());
+      let sheet = document.querySelector('.audio-recorder-sheet');
+      expect(sheet.getAttribute('aria-modal')).toBe('true');
+      expect(sheet.querySelector('[role="timer"]').textContent).toBe('00:00');
+      expect(buttonWithText(sheet, 'Use recording').disabled).toBe(true);
+      act(() => sheet.querySelector('[aria-label="Start recording"]').click());
+      await flush();
+      expect(supportedChecks[0]).toBe('audio/mp4');
+      act(() => sheet.querySelector('[aria-label="Stop recording"]').click());
+      await flush();
+      expect(trackStops).toBeGreaterThan(0);
+      expect(buttonWithText(sheet, 'Use recording').disabled).toBe(false);
+      act(() => buttonWithText(sheet, 'Use recording').click());
+      await wait(30);
+      const attachment = view.draftCache.get('thread-1').draft.attachments[0];
+      expect(attachment.kind).toBe('file');
+      expect(attachment.mime).toBe(mime);
+      expect(attachment.name).toMatch(mime === 'audio/mp4' ? /^recording-\d+\.m4a$/ : /^recording-\d+\.webm$/);
+      expect(view.root.querySelector('.composer-markers .ri-mic-line')).not.toBeNull();
+      expect(document.querySelector('.audio-recorder-sheet')).toBeNull();
+      expect(document.activeElement === plus).toBe(true);
+      act(() => plus.click());
+      act(() => buttonWithText(view.root.querySelector('.plus-menu'), 'Record audio').click());
+      sheet = document.querySelector('.audio-recorder-sheet');
+      act(() => sheet.querySelector('[aria-label="Start recording"]').click());
+      await flush();
+      const before = trackStops;
+      view.unmount();
+      await flush();
+      expect(trackStops).toBeGreaterThan(before);
+    } finally {
+      view.unmount();
+      window.MediaRecorder = originalRecorder;
+      if (mediaDevices) Object.defineProperty(navigator, 'mediaDevices', mediaDevices);
+      else delete navigator.mediaDevices;
+    }
+  });
+
+  test('keeps the recording sheet when the attachment is rejected for size', async () => {
+    const originalRecorder = window.MediaRecorder;
+    const mediaDevices = Object.getOwnPropertyDescriptor(navigator, 'mediaDevices');
+    window.MediaRecorder = class {
+      static isTypeSupported() { return true; }
+      constructor(_stream, options) { this.mimeType = options.mimeType; this.state = 'inactive'; }
+      start() { this.state = 'recording'; }
+      stop() {
+        this.state = 'inactive';
+        queueMicrotask(() => {
+          this.ondataavailable?.({ data: new window.Blob(['x'], { type: this.mimeType }) });
+          this.onstop?.();
+        });
+      }
+    };
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) } });
+    const view = mount(createState({ composer: { ...createState().composer, attachments: [] } }), { mobile: true });
+    try {
+      act(() => view.root.querySelector('[aria-label="Composer actions"]').click());
+      act(() => buttonWithText(view.root.querySelector('.plus-menu'), 'Record audio').click());
+      const sheet = document.querySelector('.audio-recorder-sheet');
+      act(() => sheet.querySelector('[aria-label="Start recording"]').click());
+      await flush();
+      act(() => sheet.querySelector('[aria-label="Stop recording"]').click());
+      await flush();
+      const originalFile = window.File;
+      window.File = class extends window.Blob {
+        constructor(parts, name, options) { super(parts, options); this.name = name; Object.defineProperty(this, 'size', { value: 10 * 1024 * 1024 + 1 }); }
+      };
+      try {
+        act(() => buttonWithText(sheet, 'Use recording').click());
+        await wait(30);
+      } finally { window.File = originalFile; }
+      expect(view.errors.at(-1).message).toBe('Each file must be 10 MB or smaller.');
+      expect(document.querySelector('.audio-recorder-sheet')).not.toBeNull();
+      expect(buttonWithText(document.querySelector('.audio-recorder-sheet'), 'Use recording').disabled).toBe(false);
+      expect(view.draftCache.get('thread-1')?.draft.attachments ?? []).toHaveLength(0);
+    } finally {
+      view.unmount();
+      window.MediaRecorder = originalRecorder;
+      if (mediaDevices) Object.defineProperty(navigator, 'mediaDevices', mediaDevices);
+      else delete navigator.mediaDevices;
+    }
+  });
+
+  test('keeps the model radio group tabbable when the models list changes', () => {
+    const state = createState({ composer: { ...createState().composer, model: null } });
+    const view = mount(state, { mobile: true, models: [] });
+    try {
+      view.rerender(state, { models });
+      act(() => view.root.querySelector('.model-chip').click());
+      const radios = [...document.querySelectorAll('[aria-label="Choose model"] [role="radio"]')];
+      expect(radios.length).toBeGreaterThan(1);
+      expect(radios.filter((radio) => radio.tabIndex === 0)).toHaveLength(1);
+    } finally { view.unmount(); }
+  });
+
+  test('reports microphone denial and releases late permission results after cancellation', async () => {
+    const originalRecorder = window.MediaRecorder;
+    const mediaDevices = Object.getOwnPropertyDescriptor(navigator, 'mediaDevices');
+    let finish;
+    let trackStops = 0;
+    let deny = true;
+    window.MediaRecorder = class {};
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: () => deny
+      ? Promise.reject(Object.assign(new Error('Denied'), { name: 'NotAllowedError' }))
+      : new Promise((resolve) => { finish = resolve; }) } });
+    const view = mount(createState(), { mobile: true });
+    try {
+      const plus = view.root.querySelector('[aria-label="Composer actions"]');
+      act(() => plus.click());
+      act(() => buttonWithText(view.root.querySelector('.plus-menu'), 'Record audio').click());
+      act(() => document.querySelector('[aria-label="Start recording"]').click());
+      await flush();
+      expect(view.errors[0].message).toContain('Microphone access was denied');
+      expect(document.querySelector('.audio-recorder-sheet')).toBeNull();
+      deny = false;
+      act(() => plus.click());
+      act(() => buttonWithText(view.root.querySelector('.plus-menu'), 'Record audio').click());
+      act(() => document.querySelector('[aria-label="Start recording"]').click());
+      await flush();
+      act(() => buttonWithText(document.querySelector('.audio-recorder-sheet'), 'Cancel').click());
+      finish({ getTracks: () => [{ stop: () => { trackStops += 1; } }] });
+      await flush();
+      expect(trackStops).toBe(1);
+      expect(document.querySelector('.audio-recorder-sheet')).toBeNull();
+    } finally {
+      view.unmount();
+      window.MediaRecorder = originalRecorder;
+      if (mediaDevices) Object.defineProperty(navigator, 'mediaDevices', mediaDevices);
+      else delete navigator.mediaDevices;
+    }
+  });
+
+  test('shows sending and connection-wait feedback while delivery is pending', async () => {
+    let finish;
+    const state = createState();
+    const view = mount(state, { respond: (method) => method === METHODS.send ? new Promise((resolve) => { finish = resolve; }) : Promise.resolve({}) });
+    view.client.status = { status: 'online' };
+    try {
+      act(() => view.root.querySelector('form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })));
+      await flush();
+      expect(view.root.querySelector('.send.is-sending .ri-loader-4-line.spinning')).not.toBeNull();
+      expect(view.root.querySelector('.composer-save-status[role="status"]').textContent).toBe('Sending...');
+      view.client.status = { status: 'reconnecting' };
+      view.rerender({ ...state, run: { active: true } });
+      expect(view.root.querySelector('.send.is-sending')).not.toBeNull();
+      expect(view.root.querySelector('.composer-save-status').textContent).toBe('Waiting for connection...');
+      finish({});
+      await flush();
+      expect(view.root.querySelector('.send.is-sending')).toBeNull();
+    } finally { finish?.({}); view.unmount(); }
+  });
+
+  test('announces pending suggestions and empty results without expanding the combobox', async () => {
+    let finish;
+    const view = mount(createState(), { respond: (method) => method === METHODS.commands ? new Promise((resolve) => { finish = resolve; }) : Promise.resolve({}) });
+    try {
+      type(view.root, '$missing');
+      await wait(180);
+      expect(view.root.querySelector('.command-picker-status[role="status"]').textContent).toBe('Searching...');
+      expect(view.root.querySelector('.command-picker-status .spinning')).not.toBeNull();
+      expect(view.root.querySelector('textarea').getAttribute('aria-expanded')).toBe('false');
+      finish([]);
+      await flush();
+      expect(view.root.querySelector('.command-picker-status').textContent).toBe('No matches');
+      expect(view.root.querySelector('textarea').hasAttribute('aria-controls')).toBe(false);
+      type(view.root, '');
+      await flush();
+      expect(view.root.querySelector('.command-picker')).toBeNull();
+    } finally { finish?.([]); view.unmount(); }
+  });
+
+  test('shows no empty-result status when the suggestions request fails', async () => {
+    const view = mount(createState(), { respond: (method) => method === METHODS.commands ? Promise.reject(new Error('offline')) : Promise.resolve({}) });
+    try {
+      type(view.root, '$missing');
+      await wait(180);
+      await flush();
+      expect(view.root.querySelector('.command-picker')).toBeNull();
+    } finally { view.unmount(); }
+  });
+});
+
 describe('composer parity', () => {
   test('omits the strip container when empty and restores it when tasks appear', () => {
     const state = createState({ tasks: [], subagents: [], rubberDucks: [], queue: { steer: [], queued: [] } });

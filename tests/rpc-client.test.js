@@ -144,13 +144,118 @@ describe('RpcClient over ORPC Draft 2', () => {
     await closeClient(client);
   });
 
-  test('closes the channel on an expired event', async () => {
+  test('acknowledges and drops an expired event without closing the channel', async () => {
     const { client, socket } = await connectClient();
     const errors = [];
+    const notifications = [];
+    const stale = [];
     client.addEventListener('protocol-error', (event) => errors.push(event.detail));
-    socket.message(await eventFrame('conversation.ready', { sequence: 1 }, { eventId: 'evt-x', expiresAt: Date.now() - 1 }));
-    await until(() => socket.readyState === 3);
-    expect(errors.map((error) => `${error.code}: ${error.message}`)).toEqual(['PROTOCOL: Invalid or expired event']);
+    client.addEventListener('notification', (event) => notifications.push(event.detail));
+    client.addEventListener('stale-event', (event) => stale.push(event.detail));
+    socket.message(await eventFrame('conversation.event', { sequence: 7 }, { eventId: 'evt-x', expiresAt: Date.now() - 1, id: 'stale1' }));
+    await until(() => socket.rawSent.some((wire) => decodeWireFrame(wire).type === 'RES' && decodeWireFrame(wire).baseId === 'stale1' && !decodeWireFrame(wire).control));
+    expect(socket.readyState).toBe(1);
+    expect(errors).toEqual([]);
+    expect(notifications).toEqual([]);
+    expect(stale).toEqual([{ method: 'conversation:event' }]);
+    await closeClient(client);
+  });
+
+  test('resume keeps a live socket and replaces a socket that stops answering pings', async () => {
+    const { client, socket } = await connectClient({ reconnect: true });
+    await expect(client.resume()).resolves.toBe(client);
+    expect(client.socket).toBe(socket);
+    const stalled = client.socket;
+    stalled.deliver = () => {};
+    client.peer.limits.attemptMs = 60_000;
+    const original = client.peer.ping.bind(client.peer);
+    client.peer.ping = () => original(40);
+    const statuses = [];
+    client.addEventListener('status', (event) => statuses.push(event.detail.status));
+    const resumed = client.resume();
+    await until(() => FakeSocket.instances.at(-1) !== stalled, 4000);
+    await expect(resumed).resolves.toBe(client);
+    expect(stalled.readyState).toBe(3);
+    expect(client.socket.readyState).toBe(1);
+    expect(statuses).toEqual(['offline', 'checking', 'online']);
+    expect(client.reconnectAttempt).toBe(0);
+    await closeClient(client);
+  });
+
+  test('resume probes a live socket with the production 5 s deadline', async () => {
+    const { client } = await connectClient({ reconnect: true });
+    const deadlines = [];
+    const original = client.peer.ping.bind(client.peer);
+    client.peer.ping = (timeoutMs) => { deadlines.push(timeoutMs); return original(timeoutMs); };
+    await expect(client.resume()).resolves.toBe(client);
+    expect(deadlines).toEqual([5_000]);
+    expect(FakeSocket.instances).toHaveLength(1);
+    await closeClient(client);
+  });
+
+  test('a pending resume probe does not resurrect a client closed meanwhile', async () => {
+    const { client, socket } = await connectClient({ reconnect: true });
+    const deliver = socket.deliver.bind(socket);
+    socket.deliver = (frame) => { if (!decodeWireFrame(frame).id.endsWith('#PONG')) deliver(frame); };
+    const original = client.peer.ping.bind(client.peer);
+    client.peer.ping = () => original(40);
+    const resumed = client.resume();
+    await closeClient(client);
+    await expect(resumed).resolves.toBe(client);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(client.closed).toBe(true);
+    expect(client.disposed).toBe(true);
+    expect(socket.readyState).toBe(3);
+    expect(FakeSocket.instances).toHaveLength(1);
+  });
+
+  test('a pending resume probe stays terminal after an authentication rejection', async () => {
+    const { client, socket } = await connectClient({ reconnect: true });
+    socket.deliver = () => {};
+    const resumed = client.resume();
+    socket.close(4003, 'Unauthorized');
+    await expect(resumed).resolves.toBe(client);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(client.closed).toBe(true);
+    expect(client.reconnectTimer).toBeNull();
+    expect(FakeSocket.instances).toHaveLength(1);
+  });
+
+  test('a natural close during a resume probe fails once and reconnects with a single new socket', async () => {
+    const { client, socket } = await connectClient({ reconnect: true });
+    socket.deliver = () => {};
+    const closes = [];
+    client.addEventListener('close', (event) => closes.push(event.detail.code));
+    const resumed = client.resume();
+    socket.close(1006, 'Network changed');
+    await expect(resumed).resolves.toBe(client);
+    expect(closes).toEqual([1006]);
+    expect(client.failures).toBe(1);
+    expect(FakeSocket.instances).toHaveLength(2);
+    expect(client.socket).toBe(FakeSocket.instances.at(-1));
+    expect(client.socket.readyState).toBe(1);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(FakeSocket.instances).toHaveLength(2);
+    await closeClient(client);
+  });
+
+  test('recovers automatically from a protocol rejection with a fresh peer', async () => {
+    const { client, socket } = await connectClient({ reconnect: true });
+    const previousPeer = client.peer;
+    socket.close(1002, 'protocol');
+    expect(client.closed).toBe(false);
+    expect(previousPeer.closed).toBe(true);
+    expect(client.reconnectTimer).not.toBeNull();
+    expect(client.reconnectAttempt).toBeGreaterThanOrEqual(3);
+    clearTimeout(client.reconnectTimer);
+    client.reconnectTimer = null;
+    await client.connect();
+    expect(client.peer).not.toBe(previousPeer);
+    const pending = client.request('rpc:discover', {});
+    const fresh = FakeSocket.instances.at(-1);
+    await until(() => fresh.sent.length === 1);
+    fresh.message({ id: fresh.sent[0].id, result: { ok: true } });
+    await expect(pending).resolves.toEqual({ ok: true });
     await closeClient(client);
   });
 

@@ -858,6 +858,27 @@
   place-items: center;
   padding: 20px;
   background: rgb(0 0 0 / .62);
+  animation: overlay-fade-in --duration-fast --ease-smooth-out;
+}
+
+@keyframes overlay-fade-in {
+  from { opacity: 0; }
+}
+
+@keyframes surface-pop-in {
+  from { opacity: 0; transform: scale(.96) translateY(8px); }
+}
+
+@keyframes surface-slide-up {
+  from { transform: translateY(100%); }
+}
+
+@keyframes surface-slide-right {
+  from { transform: translateX(-100%); }
+}
+
+@keyframes message-in {
+  from { opacity: 0; transform: translateY(6px); }
 }
 
 .sidebar-dialog {
@@ -870,6 +891,7 @@
   border-radius: 12px;
   background: --background-secondary;
   box-shadow: 0 24px 72px rgb(0 0 0 / .48);
+  animation: surface-pop-in --duration-medium --ease-smooth-out;
 
   > header {
     display: flex;
@@ -1402,6 +1424,54 @@
   }
 }
 
+.workspace-connection-strip {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 6px 16px;
+  background: --background-secondary;
+  color: --text-muted;
+  font-size: 12px;
+  animation: strip-in --duration-medium --ease-smooth-out;
+
+  &.is-offline {
+    color: --warn-color;
+  }
+
+  > i {
+    font-size: 14px;
+  }
+}
+
+@keyframes strip-in {
+  from { opacity: 0; transform: translateY(-6px); }
+}
+
+.conversation-skeleton {
+  width: min(820px, 100%);
+  margin: auto;
+  display: grid;
+  gap: 22px;
+
+  > span {
+    height: 56px;
+    border-radius: 12px;
+    background: linear-gradient(90deg, --background-secondary 25%, --background-tertiary 50%, --background-secondary 75%);
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.4s linear infinite;
+
+    &:nth-child(1) { width: 62%; justify-self: end; }
+    &:nth-child(2) { width: 88%; height: 96px; }
+    &:nth-child(3) { width: 48%; justify-self: end; }
+  }
+}
+
+@keyframes skeleton-shimmer {
+  to { background-position: -200% 0; }
+}
+
 .conversation-scroll {
   min-height: 0;
   flex: 1;
@@ -1841,6 +1911,7 @@
     border: 0;
     border-radius: 0;
     background: rgb(0 0 0 / .58);
+    animation: overlay-fade-in --duration-fast --ease-smooth-out;
   }
 
   .sidebar-popover {
@@ -1866,6 +1937,7 @@
     background: --background-secondary;
     box-shadow: 0 24px 72px rgb(0 0 0 / .48);
     transform: translate(-50%, -50%);
+    animation: overlay-fade-in --duration-medium --ease-smooth-out;
 
     .sidebar {
       width: 100%;
@@ -1962,6 +2034,7 @@
     border-radius: 14px;
     box-shadow: 0 0 0 100vmax rgb(0 0 0 / .58), 0 24px 72px rgb(0 0 0 / .48);
     transform: translate(-50%, -50%);
+    animation: overlay-fade-in --duration-medium --ease-smooth-out;
     grid-template-rows: 48px minmax(0, 1fr);
 
     > header {
@@ -2039,6 +2112,63 @@
     border-radius: 0;
     box-shadow: none;
     transform: none;
+  }
+
+  .mobile-drawer {
+    width: min(86vw, 360px);
+    right: auto;
+    border-right: 1px solid --border-color;
+    animation: surface-slide-right --duration-medium --ease-smooth-out;
+  }
+
+  .auxiliary-panel {
+    --sheet-height: min(calc(var(--app-height) * .92), calc(var(--app-height) - 48px));
+    top: calc(var(--app-offset-top) + var(--app-height) - var(--sheet-height));
+    bottom: auto;
+    height: --sheet-height;
+    border-top: 1px solid --border-color;
+    border-radius: 18px 18px 0 0;
+    animation: surface-slide-up --duration-medium --ease-smooth-out;
+  }
+
+  .sidebar-dialog-backdrop {
+    align-items: end;
+    padding: 0;
+  }
+
+  .sidebar-dialog {
+    width: 100%;
+    max-height: calc(100% - 48px);
+    padding-bottom: var(--safe-bottom);
+    border: 0;
+    border-top: 1px solid --border-color;
+    border-radius: 18px 18px 0 0;
+    animation: surface-slide-up --duration-medium --ease-smooth-out;
+  }
+
+  .messages-column > * {
+    animation: message-in --duration-fast --ease-smooth-out;
+  }
+}
+
+@media (pointer: coarse) {
+  .nav-action,
+  .folder-new-chat,
+  .navigation-trigger,
+  .workspace-header button,
+  .thread-list button,
+  .bot-list button,
+  .sidebar-dialog button,
+  .round-control,
+  .control-chip,
+  .model-chip,
+  .send {
+    transition: transform --duration-fast --ease-smooth-out, background --duration-fast --ease-smooth-out, opacity --duration-fast --ease-smooth-out;
+
+    &:active:not(:disabled) {
+      transform: scale(.96);
+      opacity: .85;
+    }
   }
 }
 

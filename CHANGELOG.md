@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- Mobile Composer photo library, camera photo/video capture, and in-app audio recording on MediaRecorder-capable browsers, with shared attachment limits and media markers.
+- Mobile model bottom sheet with intelligence presets and reasoning effort controls; sending, connection-wait and suggestion-loading feedback.
+- Connection status strip under the thread header (connecting, opening conversation, disconnected and reconnecting, creating chat) and a skeleton placeholder while a conversation loads.
+- Mobile motion: side drawer, bottom-sheet auxiliary panel and dialogs, fading overlays, message entrance and touch press feedback at phone widths; all honour `prefers-reduced-motion`.
+
 ### Changed
 
 - **Breaking:** RPC now requires ORPC Draft 2 (`avi-orpc-draft2`) with multipart requests/responses, fresh recovery IDs, reserved cancellation/integrity/heartbeat/shutdown controls, and mandatory SHA-256 `CHECKSEND` verification. Upgrade Desktop and Workspace together; no Draft 1 fallback is provided. The physical `avi-relay-v1` transport is unchanged. Updated the RPC documentation and bundled specification.
@@ -13,6 +20,11 @@
 - Consolidate repeated connection failures into one delayed warning instead of displaying every transport error; retain technical details in the connection dialog.
 - Accept files up to 10 MiB each using native ORPC multipart transfers, with explicit aggregate request limits instead of the old 512 KiB inline limit.
 - ORPC ignores byte-identical parts duplicated after dispatch and acknowledges repeated integrity checks without redispatch.
+- Returning to the app (visibility, `pageshow`, or `online`) now probes each open channel with a 5 s ORPC ping; a socket that iOS froze in the background is dropped and reconnected immediately instead of leaving requests hanging until their 60 s deadline. Reconnect backoff restarts from zero on resume.
+- Server events whose acceptance deadline passed while the tab was suspended are acknowledged and dropped instead of closing the channel; the sequence gap triggers the regular `conversations:context` recovery.
+- Protocol and limit rejections (close 1002/1008/1009, relay `protocol`) restart from a fresh ORPC peer with a longer backoff instead of stopping automatic reconnection; only an authentication rejection (4003) still waits for the user.
+- Conversation recovery requests that overlap (resume, `conversation:ready`, sequence gaps) coalesce into one run followed by a single follow-up, and a dropped stale event triggers recovery instead of relying on the next sequence check.
+- The phone-width auxiliary bottom sheet anchors to the visual viewport, so it stays above the iOS keyboard instead of the layout viewport bottom.
 
 ## [0.2.0] - 2026-09-08
 

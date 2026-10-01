@@ -12,6 +12,8 @@ export class RpcError extends Error {
   }
 }
 
+const RESUME_PROBE_MS = 5_000;
+
 export class RpcClient extends EventTarget {
   constructor({ url, apiKey, relay = null, path = '/rpc', timeoutMs = 60_000, reconnect = true, WebSocketImpl = globalThis.WebSocket }) {
     super();
@@ -34,6 +36,7 @@ export class RpcClient extends EventTarget {
     this.reconnectTimer = null;
     this.problemTimer = null;
     this.failures = 0;
+    this.probe = null;
     this.status = { status: 'offline', error: null, problem: false };
   }
 
@@ -57,7 +60,13 @@ export class RpcClient extends EventTarget {
         if (this.closed) return new Uint8Array();
         const content = utf8Text(bytes);
         const event = JSON.parse(content);
-        if (!event.eventId || !Number.isFinite(event.expiresAt) || event.expiresAt < Date.now()) throw new OrpcError('Invalid or expired event');
+        if (!event.eventId || !Number.isFinite(event.expiresAt)) throw new OrpcError('Invalid event');
+        // A suspended tab (iOS background) receives events whose deadline already passed; dropping
+        // them is safe because the conversation sequence gap triggers an authoritative recovery.
+        if (event.expiresAt < Date.now()) {
+          this.dispatchEvent(new CustomEvent('stale-event', { detail: { method: method.replace('.', ':') } }));
+          return new TextEncoder().encode('OK');
+        }
         for (const [id, entry] of this.events) if (entry.expiresAt < Date.now()) this.events.delete(id);
         const previous = this.events.get(event.eventId);
         if (previous) {
@@ -140,6 +149,34 @@ export class RpcClient extends EventTarget {
     return this.connectPromise;
   }
 
+  // Returning from the background (iOS suspends sockets without a close event) can leave an OPEN
+  // socket that no longer delivers frames; a bounded ping proves liveness or drops it immediately.
+  resume() {
+    if (this.closed || this.disposed) return Promise.resolve(this);
+    if (this.socket?.readyState !== this.WebSocketImpl?.OPEN) {
+      this.reconnectAttempt = 0;
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+      return this.connectUntilReady();
+    }
+    if (this.probe) return this.probe;
+    const socket = this.socket;
+    this.probe = this.peer.ping(RESUME_PROBE_MS).then(() => this, () => {
+      if (this.closed || this.disposed) return this;
+      if (this.socket === socket && socket.readyState === this.WebSocketImpl.OPEN) {
+        const reason = 'Connection stalled after resume';
+        this.handleClose({ code: 1006, reason, retryable: true }, socket);
+        this.socket = null;
+        try { socket.close(1000, reason); } catch {}
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+        this.reconnectAttempt = 0;
+      }
+      return this.connectUntilReady();
+    }).finally(() => { this.probe = null; });
+    return this.probe;
+  }
+
   connectUntilReady({ timeoutMs = 0 } = {}) {
     if (!this.WebSocketImpl) return Promise.reject(new Error('WebSocket is unavailable in this browser.'));
     if (this.socket?.readyState === this.WebSocketImpl.OPEN) return Promise.resolve(this);
@@ -206,9 +243,11 @@ export class RpcClient extends EventTarget {
     if (this.socket !== source || this.disposed) return;
     clearTimeout(this.stableTimer);
     this.failures++;
-    if (this.relay && event.retryable === false) this.closed = true;
     if ([1002, 1008, 1009, 4003].includes(event.code) || event.retryable === false) {
-      this.closed = true;
+      // Only an authentication rejection needs the user; protocol or limit rejections restart
+      // from a fresh peer after a longer backoff so the session heals without intervention.
+      if (event.code === 4003) this.closed = true;
+      else this.reconnectAttempt = Math.max(this.reconnectAttempt, 3);
       this.peer.terminate(new OrpcError(event.reason || 'Channel rejected', event.code === 1009 ? 'LIMIT' : 'PROTOCOL'));
     } else this.peer.channelFailed();
     this.dispatchStatus('offline', event.reason || `Connection closed (${event.code}).`);
@@ -220,11 +259,11 @@ export class RpcClient extends EventTarget {
     if (!this.closed && this.reconnect) this.scheduleReconnect();
   }
 
-  scheduleReconnect() {
+  scheduleReconnect(delayMs = null) {
     if (this.closed || this.reconnectTimer) return;
-    const delay = this.relay
+    const delay = delayMs ?? (this.relay
       ? Math.min(1_000 * (2 ** Math.min(this.reconnectAttempt++, 5)), 30_000) * (0.75 + Math.random() * 0.25)
-      : Math.min(1_000 * (2 ** Math.min(this.reconnectAttempt++, 4)), 15_000);
+      : Math.min(1_000 * (2 ** Math.min(this.reconnectAttempt++, 4)), 15_000));
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       if (!this.closed) this.connect().catch(() => this.scheduleReconnect());

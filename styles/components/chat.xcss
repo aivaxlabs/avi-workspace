@@ -768,6 +768,11 @@
 }
 
 
+@keyframes sheet-in {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
 .queue-sheet-backdrop {
   position: fixed;
   inset: var(--app-offset-top) 0 auto;
@@ -787,6 +792,135 @@
   border-radius: 18px 18px 0 0;
   background: --background-secondary;
   color: --text-primary;
+
+  &.model-sheet,
+  &.audio-recorder-sheet {
+    padding-bottom: calc(12px + var(--safe-bottom));
+    animation: sheet-in --duration-medium --ease-smooth-out;
+
+    &::before {
+      content: '';
+      flex-shrink: 0;
+      width: 36px;
+      height: 4px;
+      margin: 8px auto 0;
+      border-radius: 2px;
+      background: --text-muted;
+    }
+
+    > .queue-sheet-body {
+      min-height: 0;
+    }
+  }
+
+  &.model-sheet {
+    .model-sheet-intelligence {
+      margin-bottom: 16px;
+    }
+
+    .model-sheet-options {
+      display: grid;
+      gap: 4px;
+
+      > button {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        min-height: 52px;
+        padding: 10px 12px;
+        font-size: 16px;
+        text-align: left;
+
+        &[aria-checked="true"] {
+          background: --item-active;
+          color: --text-primary;
+        }
+
+        > span {
+          display: grid;
+          min-width: 0;
+          gap: 3px;
+          overflow-wrap: anywhere;
+
+          > strong { font-weight: 500; }
+          > small { color: --text-muted; font-size: 12px; }
+        }
+
+        > i { color: --primary-color; }
+      }
+    }
+
+    .model-sheet-effort {
+      margin-top: 16px;
+      padding-top: 12px;
+      border-top: 1px solid --border-color;
+
+      > div {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-top: 8px;
+        padding: 4px;
+        border-radius: 12px;
+        background: --background-tertiary;
+
+        > button {
+          flex: 1;
+          padding-inline: 12px;
+          font-size: 16px;
+          text-transform: capitalize;
+
+          &[aria-pressed="true"] {
+            background: --item-active;
+            color: --text-primary;
+          }
+        }
+      }
+    }
+  }
+
+  &.audio-recorder-sheet {
+    > .queue-sheet-body {
+      display: grid;
+      justify-items: center;
+      gap: 16px;
+      padding: 20px 12px;
+
+      > .recorder-timer {
+        margin: 0;
+        font-size: 32px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      > .recorder-control {
+        width: 80px;
+        height: 80px;
+        border-radius: 50%;
+        background: --primary-color;
+        color: --text-inverse;
+        font-size: 30px;
+
+        &.is-recording { background: --danger-color; }
+      }
+
+      > [role="status"] { margin: 0; color: --text-muted; }
+    }
+
+    > footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 0 12px;
+
+      > button {
+        padding: 10px 16px;
+        font-size: 16px;
+
+        &:last-child { background: --item-active; color: --text-primary; }
+      }
+    }
+  }
 
   button {
     min-width: 44px;
@@ -1279,6 +1413,11 @@
     opacity: .35;
   }
 
+  &.is-sending {
+    opacity: .8;
+    cursor: progress;
+  }
+
   &:hover:not(:disabled) {
     background: --background-inverse;
     color: --text-inverse;
@@ -1308,16 +1447,28 @@
 .model-chip {
   max-width: 230px;
 
-  > span {
+  > .model-chip-label {
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
     overflow: hidden;
-    text-overflow: ellipsis;
     white-space: nowrap;
-  }
 
-  > small {
-    font-size: 1em;
-    color: --text-muted;
-    text-transform: capitalize;
+    > i { flex-shrink: 0; }
+
+    > strong {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-weight: 500;
+    }
+
+    > small {
+      font-size: .85em;
+      color: --text-muted;
+      text-transform: capitalize;
+    }
   }
 }
 
@@ -1412,6 +1563,10 @@
   box-shadow: 0 3px 12px rgb(0 0 0 / .12);
   > .model-reasoning-trigger { min-height: 30px; padding: 4px 10px; font-size: 12px; }
   @media (pointer: coarse) { > .model-reasoning-trigger { min-height: 44px; } }
+}
+
+.composer-menu.intelligence-menu,
+.model-sheet-intelligence {
   > .intelligence-slider {
     position: relative;
     height: 30px;
@@ -1551,6 +1706,16 @@
   background: --background-elevated;
   box-shadow: 0 10px 32px rgb(0 0 0 / .32);
 
+  > .command-picker-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    padding: 8px 9px;
+    color: --text-muted;
+    font-size: 14px;
+  }
+
   > button {
     width: 100%;
     display: grid;
@@ -1645,8 +1810,7 @@
     }
   }
 
-  .control-chip > span,
-  .model-chip > small {
+  .control-chip > span {
     display: none;
   }
 }
