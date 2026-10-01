@@ -5,6 +5,7 @@ import { act } from 'preact/test-utils';
 import { h, render } from 'preact';
 import { ConnectionsPage } from '../src/components/ConnectionsPage.jsx';
 import { listConnections } from '../src/storage/connections.js';
+import { waitForCondition } from './dom-test-helpers.js';
 
 const window = new Window({ url: 'http://localhost/' });
 Object.assign(globalThis, {
@@ -80,7 +81,7 @@ describe('ConnectionsPage', () => {
       render(h(ConnectionsPage, { statuses: {}, openingId: null, onCheck: (connection) => checks.push(connection), onEnter: () => {} }), root);
       await flush(); await flush();
     });
-    for (let i = 0; i < 12; i += 1) await act(async () => { await flush(); });
+    await waitForCondition('the initial connection probe', () => checks.length > 0);
     expect(checks).toHaveLength(1);
     await act(async () => {
       [...document.querySelectorAll('button[aria-label^="Edit"]')][0].click();
@@ -95,10 +96,8 @@ describe('ConnectionsPage', () => {
       [...document.querySelectorAll('.connection-dialog button')]
         .find((button) => button.textContent.trim() === 'Save connection')
         .click();
-      await flush(); await flush();
     });
-    expect(document.querySelector('.connection-dialog')).toBeNull();
-    expect(checks.length).toBeGreaterThanOrEqual(2);
+    await waitForCondition('the dialog to close and the saved record to be reprobed', () => !document.querySelector('.connection-dialog') && checks.length >= 2);
     const reprobed = checks.at(-1);
     expect(reprobed.label).toBe('Renamed');
     expect(reprobed.id).not.toBe('');
