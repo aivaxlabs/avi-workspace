@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-01
+
 ### Added
 
 - Mobile Composer photo library, camera photo/video capture, and in-app audio recording on MediaRecorder-capable browsers, with shared attachment limits and media markers.
