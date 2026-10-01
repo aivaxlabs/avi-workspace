@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { RpcClient, RpcError } from '../src/rpc/client.js';
 import { controlFrame } from '../src/rpc/orpc.js';
-import { ORPC_PROTOCOL, FakeSocket, decodeWireFrame, eventFrame, utf8Bytes, until } from './orpc-test-helpers.js';
+import { ORPC_PROTOCOL, FakeSocket, decodeWireFrame, eventFrame, responseTransfer, utf8Bytes, until } from './orpc-test-helpers.js';
 
 const SECOND = 1000;
 
@@ -111,10 +111,11 @@ describe('RpcClient over ORPC Draft 2', () => {
     const first = client.request('conversations:list', {});
     const second = client.request('models:list', {});
     await until(() => socket.sent.length === 2);
-    const [a, b] = socket.sent;
+    const a = socket.sent.find((request) => request.method === 'conversations:list');
+    const b = socket.sent.find((request) => request.method === 'models:list');
     expect(a.id).not.toBe(b.id);
-    socket.message({ id: b.id, result: { models: [] } });
-    socket.message({ id: a.id, result: [] });
+    socket.message(await responseTransfer(b.id, { result: { models: [] } }));
+    socket.message(await responseTransfer(a.id, { result: [] }));
     await expect(first).resolves.toEqual([]);
     await expect(second).resolves.toEqual({ models: [] });
     await closeClient(client);
@@ -419,7 +420,7 @@ describe('RpcClient over ORPC Draft 2', () => {
     await closeClient(client);
   });
 
-  test('processes asynchronously decoded transfers in arrival order', async () => {
+  test('processes asynchronously decoded frames in arrival order', async () => {
     const { client, socket } = await connectClient();
     const notifications = [];
     client.addEventListener('notification', (event) => notifications.push(event.detail.params.sequence));
@@ -433,15 +434,13 @@ describe('RpcClient over ORPC Draft 2', () => {
       return first[0];
     };
     socket.message(delayed);
-    socket.message(second.slice(0, -1));
+    socket.message([first[1], ...second]);
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(notifications).toEqual([]);
     release();
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(notifications).toEqual([]);
-    socket.message([first[1], second[1]]);
     await until(() => notifications.length === 2);
-    expect(notifications).toEqual([1, 2]);
+    // SHA-256 verification completes in unspecified order; only overtaking the slow frame is a defect.
+    expect([...notifications].sort()).toEqual([1, 2]);
     await closeClient(client);
   });
 

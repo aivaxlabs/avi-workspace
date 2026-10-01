@@ -2,7 +2,7 @@ import { afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import { act } from 'preact/test-utils';
 import { h, render } from 'preact';
-import { FakeSocket as OrpcSocket, eventFrame } from './orpc-test-helpers.js';
+import { FakeSocket as OrpcSocket, decodeWireFrame, eventFrame } from './orpc-test-helpers.js';
 
 const window = new Window({ url: 'http://localhost/' });
 Object.assign(globalThis, {
@@ -98,9 +98,13 @@ describe('conversation recovery', () => {
     const socket = FakeSocket.instances.at(-1);
     expect(root.querySelector('.conversation-skeleton')).not.toBeNull();
 
-    socket.ready();
-    socket.ready();
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
+    for (const id of ['ready1', 'ready2']) {
+      socket.message(await eventFrame('conversation.ready', { sequence: 0, conversationId: 'thread-1' }, { id }));
+      await waitFor(() => socket.rawSent.some((wire) => {
+        const frame = decodeWireFrame(wire);
+        return frame.type === 'RES' && frame.baseId === id && !frame.control;
+      }));
+    }
     expect(contextRequests).toHaveLength(1);
 
     socket.answer(contextRequests[0]);
