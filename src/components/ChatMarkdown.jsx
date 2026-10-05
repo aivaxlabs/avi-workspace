@@ -60,7 +60,9 @@ function AsyncVisualization({ source, displayMode, kind }) {
             FORBID_TAGS: ['foreignObject', 'script', 'image', 'a'],
             FORBID_ATTR: ['href', 'xlink:href'],
           });
-          output = { image: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}` };
+          const [, , width, height] = svg.match(/viewBox="([^"]+)"/)?.[1].split(/[\s,]+/) ?? [];
+          const sized = width && height ? svg.replace(/^<svg([^>]*?)\swidth="[^"]*"/, `<svg$1 width="${width}" height="${height}"`) : svg;
+          output = { image: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(sized)}` };
         } else {
           const { default: katex } = await import('katex');
           output = { html: katex.renderToString(source, { displayMode: Boolean(displayMode), output: 'mathml', throwOnError: true, trust: false, strict: 'error', maxExpand: 1000, maxSize: 20 }) };
