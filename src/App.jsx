@@ -45,15 +45,18 @@ export function App() {
     const viewport = window.visualViewport;
     if (!viewport) return;
     const style = document.documentElement.style;
+    let fullHeight = { width: 0, height: 0 };
     const syncViewport = () => {
       if (viewport.scale !== 1) return;
+      if (fullHeight.width !== window.innerWidth) fullHeight = { width: window.innerWidth, height: 0 };
+      fullHeight.height = Math.max(fullHeight.height, window.innerHeight);
       if (!document.activeElement?.matches('input, textarea, [contenteditable="true"]')) {
         for (const property of ['--app-height', '--app-offset-top', '--keyboard-inset']) style.removeProperty(property);
         return;
       }
       style.setProperty('--app-height', `${viewport.height}px`);
       style.setProperty('--app-offset-top', `${viewport.offsetTop}px`);
-      style.setProperty('--keyboard-inset', `${Math.max(0, window.innerHeight - viewport.height)}px`);
+      style.setProperty('--keyboard-inset', `${Math.max(0, fullHeight.height - viewport.height)}px`);
     };
     syncViewport();
     viewport.addEventListener('resize', syncViewport);

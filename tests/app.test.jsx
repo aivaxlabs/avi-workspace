@@ -182,6 +182,33 @@ describe('App connections and workspace lifecycle', () => {
     }
   });
 
+  test('measures the keyboard inset against the full height when innerHeight shrinks with the keyboard', async () => {
+    const original = Object.getOwnPropertyDescriptor(window, 'visualViewport');
+    const originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+    const fullHeight = window.innerHeight;
+    const viewport = new window.EventTarget();
+    Object.assign(viewport, { height: fullHeight, offsetTop: 0, scale: 1 });
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+    const style = document.documentElement.style;
+    const input = document.createElement('textarea');
+    try {
+      await renderApp();
+      document.body.append(input);
+      act(() => input.focus());
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: fullHeight - 300 });
+      viewport.height = fullHeight - 300;
+      act(() => viewport.dispatchEvent(new window.Event('resize')));
+      expect(style.getPropertyValue('--keyboard-inset')).toBe('300px');
+    } finally {
+      input.remove();
+      act(() => render(null, root));
+      if (originalInnerHeight) Object.defineProperty(window, 'innerHeight', originalInnerHeight);
+      else delete window.innerHeight;
+      if (original) Object.defineProperty(window, 'visualViewport', original);
+      else delete window.visualViewport;
+    }
+  });
+
   test('account approval lists relay devices before opening independent global and conversation consumers', async () => {
     const originalFetch = globalThis.fetch;
     const tickets = [];
