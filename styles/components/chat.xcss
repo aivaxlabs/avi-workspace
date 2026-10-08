@@ -826,6 +826,18 @@
   &.model-sheet {
     .model-sheet-intelligence {
       margin-bottom: 16px;
+
+      > .model-sheet-selection {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        margin: 10px 2px 0;
+        color: --text-primary;
+        font-size: 14px;
+
+        > strong { font-weight: 500; }
+        > span { color: --text-muted; text-transform: capitalize; }
+      }
     }
 
     .model-sheet-options {
@@ -854,7 +866,6 @@
           overflow-wrap: anywhere;
 
           > strong { font-weight: 500; }
-          > small { color: --text-muted; font-size: 12px; }
         }
 
         > i { color: --primary-color; }
@@ -862,9 +873,9 @@
     }
 
     .model-sheet-effort {
-      margin-top: 16px;
-      padding-top: 12px;
-      border-top: 1px solid --border-color;
+      margin-bottom: 16px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid --border-color;
 
       > div {
         display: flex;

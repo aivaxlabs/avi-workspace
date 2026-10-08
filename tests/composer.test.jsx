@@ -228,7 +228,9 @@ describe('mobile composer', () => {
       act(() => buttonWithText(sheet, 'Model Two').click());
       expect(chip.textContent).toContain('Model Two');
       expect(chip.textContent).toContain('high');
-      expect(sheet.querySelector('[role="radio"][aria-checked="true"]').textContent).toContain('model:two');
+      expect(sheet.querySelector('[role="radio"][aria-checked="true"]').textContent).toBe('Model Two');
+      expect(sheet.querySelector('.model-sheet-selection').textContent).toBe('Model Twohigh');
+      expect(sheet.querySelector('.model-sheet-effort').compareDocumentPosition(sheet.querySelector('.model-sheet-options')) & window.Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       act(() => buttonWithText(sheet, 'medium').click());
       expect(chip.textContent).toContain('medium');
       act(() => buttonWithText(sheet, 'Model One').click());

@@ -1251,6 +1251,24 @@ h1, h2, h3, h4, h5, h6, strong, b, th {
     margin-bottom: 16px;
 }
 
+.queue-sheet.model-sheet .model-sheet-intelligence > .model-sheet-selection {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 10px 2px 0;
+    color: var(--text-primary);
+    font-size: 14px;
+}
+
+.queue-sheet.model-sheet .model-sheet-intelligence > .model-sheet-selection > strong {
+    font-weight: 500;
+}
+
+.queue-sheet.model-sheet .model-sheet-intelligence > .model-sheet-selection > span {
+    color: var(--text-muted);
+    text-transform: capitalize;
+}
+
 .queue-sheet.model-sheet .model-sheet-options {
     display: grid;
     gap: 4px;
@@ -1283,19 +1301,14 @@ h1, h2, h3, h4, h5, h6, strong, b, th {
     font-weight: 500;
 }
 
-.queue-sheet.model-sheet .model-sheet-options > button > span > small {
-    color: var(--text-muted);
-    font-size: 12px;
-}
-
 .queue-sheet.model-sheet .model-sheet-options > button > i {
     color: var(--primary-color);
 }
 
 .queue-sheet.model-sheet .model-sheet-effort {
-    margin-top: 16px;
-    padding-top: 12px;
-    border-top: 1px solid var(--border-color);
+    margin-bottom: 16px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border-color);
 }
 
 .queue-sheet.model-sheet .model-sheet-effort > div {
@@ -4518,6 +4531,7 @@ h1, h2, h3, h4, h5, h6, strong, b, th {
     .auxiliary-panel {
         position: fixed;
         z-index: 22;
+        touch-action: manipulation;
         top: 50%;
         right: auto;
         bottom: auto;

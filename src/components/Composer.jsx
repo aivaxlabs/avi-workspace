@@ -483,7 +483,7 @@ export function Composer({ client, state, models, lastModel, discovery, draftCac
   const showOptionsStatus = invocation && !suggestionsDismissed && !visibleOptions.length && (loadingOptions || (optionsLoaded && invocation[2]));
   const intelligenceSlider = hasModelSlider && <div class="intelligence-slider" style={{ '--slider-fill': `${sliderIndex / (sliderLevels.length - 1) * 100}%`, '--slider-offset': `${13 - 26 * sliderIndex / (sliderLevels.length - 1)}px` }}>
     <div class="intelligence-dots" aria-hidden="true">{sliderLevels.map((level, index) => <span key={index} class={index <= sliderIndex ? 'filled' : undefined} />)}</div>
-    <input type="range" min="0" max={sliderLevels.length - 1} step="1" value={sliderIndex} aria-label="Intelligence level" aria-valuetext={`${models.find((item) => item.id === sliderLevels[sliderIndex].modelId)?.name ?? sliderLevels[sliderIndex].modelId} - ${sliderLevels[sliderIndex].reasoningEffort || 'Default'}`} onInput={(event) => {
+    <input type="range" min="0" max={sliderLevels.length - 1} step="1" value={sliderIndex} aria-label="Intelligence level" aria-valuetext={`${selectedModel?.name ?? model} - ${reasoningEffort || 'Default'}`} onInput={(event) => {
       const level = sliderLevels[Number(event.currentTarget.value)];
       setModel(level.modelId); setReasoningEffort(level.reasoningEffort);
     }} />
@@ -547,7 +547,8 @@ export function Composer({ client, state, models, lastModel, discovery, draftCac
       <section ref={modelDialogRef} class="queue-sheet model-sheet" role="dialog" aria-modal="true" aria-label="Choose model">
         <header><strong>Model</strong><button type="button" aria-label="Close model picker" onClick={() => setModelSheetOpen(false)}><i class="ri-close-line" /></button></header>
         <div class="queue-sheet-body">
-          {hasModelSlider && <section class="model-sheet-intelligence"><h3>Intelligence</h3>{intelligenceSlider}</section>}
+          {hasModelSlider && <section class="model-sheet-intelligence"><h3>Intelligence</h3>{intelligenceSlider}<p class="model-sheet-selection" aria-live="polite"><strong>{selectedModel?.name ?? model}</strong>{reasoningEffort && <span>{reasoningEffort}</span>}</p></section>}
+          {selectedModel?.reasoning?.length > 0 && <section class="model-sheet-effort"><h3>Effort</h3><div role="group" aria-label="Reasoning effort">{selectedModel.reasoning.map((effort) => <button key={effort} type="button" aria-pressed={effort === reasoningEffort} onClick={() => setReasoningEffort(effort)}>{effort}</button>)}</div></section>}
           <div class="model-sheet-options" role="radiogroup" aria-label="Models" onKeyDown={(event) => {
             if (!['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) || !models.length) return;
             event.preventDefault();
@@ -556,9 +557,8 @@ export function Composer({ client, state, models, lastModel, discovery, draftCac
             chooseModel(models[next]);
             event.currentTarget.querySelectorAll('[role="radio"]')[next]?.focus();
           }}>{models.map((item, index) => <button key={item.id} type="button" role="radio" aria-checked={item.id === model} tabIndex={item.id === model || (index === 0 && !selectedModel) ? 0 : -1} onClick={() => chooseModel(item)}>
-            <span><strong>{item.name ?? item.id}</strong>{item.id !== (item.name ?? item.id) && <small>{item.id}</small>}</span>{item.id === model && <i class="ri-check-line" />}
+            <span><strong>{item.name ?? item.id}</strong></span>{item.id === model && <i class="ri-check-line" />}
           </button>)}</div>
-          {selectedModel?.reasoning?.length > 0 && <section class="model-sheet-effort"><h3>Effort</h3><div role="group" aria-label="Reasoning effort">{selectedModel.reasoning.map((effort) => <button key={effort} type="button" aria-pressed={effort === reasoningEffort} onClick={() => setReasoningEffort(effort)}>{effort}</button>)}</div></section>}
         </div>
       </section>
     </div>, document.body)}
