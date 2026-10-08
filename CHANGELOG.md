@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Relay connections retry automatically after every failure, including AIVAX authorization rejections, invalid tickets or handshakes, Remote rejections, and close codes `1002`, `1008`, `1009`, and `4003`; severe failures use a longer backoff instead of stopping. Direct connections still pause on authentication rejection.
+- Relay sends are queued and paced to 100 messages / 3 MiB per sliding second instead of closing the channel when the per-second budget is reached, which avoids relay `1008` traffic closes.
+- The mobile auxiliary panel no longer lets the page be zoomed with pinch or double-tap gestures while it is open; one-finger scrolling inside the panel is unchanged.
+- The mobile model sheet shows the model and effort selected by the Intelligence slider, places the Effort choices above the model list, and no longer repeats model IDs.
+
 ## [0.3.0] - 2026-10-01
 
 ### Added
