@@ -225,10 +225,26 @@ describe('workspace mobile shell', () => {
     expect(root.querySelector('.chat-area').hasAttribute('inert')).toBe(false);
     expect(document.activeElement).toBe(root.querySelector('[aria-label="Open navigation"]'));
 
+    const touchMove = (touches) => {
+      const event = new window.Event('touchmove', { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'touches', { value: Array.from({ length: touches }) });
+      document.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    const gestureStart = () => {
+      const event = new window.Event('gesturestart', { bubbles: true, cancelable: true });
+      document.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
     act(() => root.querySelector('[aria-label="Open auxiliary panel"]').click());
     expect(root.querySelector('.auxiliary-panel[role="dialog"][aria-modal="true"]')).not.toBeNull();
+    expect(gestureStart()).toBe(true);
+    expect(touchMove(2)).toBe(true);
+    expect(touchMove(1)).toBe(false);
     act(() => root.querySelector('.auxiliary-panel .close-panel').click());
     expect(root.querySelector('.auxiliary-panel')).toBeNull();
+    expect(gestureStart()).toBe(false);
+    expect(touchMove(2)).toBe(false);
 
     act(() => root.querySelector('[aria-label="Composer actions"]').click());
     const permissionOptions = root.querySelectorAll('.mobile-permission-options [role="menuitemradio"]');

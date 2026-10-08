@@ -169,6 +169,18 @@ export function WorkspacePage({ connection, globalClient, discovery, models, las
   }, []);
   useModalFocus({ containerRef: navigationDialogRef, returnFocusRef: navigationButtonRef, open: mobile && navigationOpen, onClose: () => setNavigationOpen(false) });
   useModalFocus({ containerRef: panelDialogRef, returnFocusRef: panelButtonRef, open: mobile && panelOpen, onClose: () => setPanelOpen(false) });
+  useEffect(() => {
+    if (!mobile || !panelOpen) return undefined;
+    // iOS Safari ignores user-scalable=no, so pinch zoom is blocked through its gesture events and multi-touch moves.
+    const preventZoom = (event) => {
+      if (event.type !== 'touchmove' || event.touches.length > 1) event.preventDefault();
+    };
+    const options = { passive: false };
+    for (const type of ['gesturestart', 'gesturechange', 'touchmove']) document.addEventListener(type, preventZoom, options);
+    return () => {
+      for (const type of ['gesturestart', 'gesturechange', 'touchmove']) document.removeEventListener(type, preventZoom, options);
+    };
+  }, [mobile, panelOpen]);
 
   useEffect(() => { if (!selectedId && conversations[0]) setSelectedId(conversations[0].id); }, [conversations]);
   useEffect(() => {
