@@ -115,8 +115,8 @@ export class RpcClient extends EventTarget {
       const onOpen = () => {
         if (socket.protocol !== RPC_PROTOCOL) {
           rejectInitial(new Error(`Server selected unsupported WebSocket protocol ${socket.protocol || 'none'}.`));
-          this.closed = true;
-          socket.close(1002, 'Unsupported subprotocol');
+          if (!this.relay) this.closed = true;
+          socket.close(1002, 'Unsupported subprotocol', Boolean(this.relay));
           return;
         }
         opened = true;
@@ -244,9 +244,9 @@ export class RpcClient extends EventTarget {
     clearTimeout(this.stableTimer);
     this.failures++;
     if ([1002, 1008, 1009, 4003].includes(event.code) || event.retryable === false) {
-      // Only an authentication rejection needs the user; protocol or limit rejections restart
-      // from a fresh peer after a longer backoff so the session heals without intervention.
-      if (event.code === 4003) this.closed = true;
+      // Direct authentication rejections need the user; relay sessions renew tickets and retry every
+      // failure, so protocol, limit, and relay authentication rejections restart after a longer backoff.
+      if (event.code === 4003 && !this.relay) this.closed = true;
       else this.reconnectAttempt = Math.max(this.reconnectAttempt, 3);
       this.peer.terminate(new OrpcError(event.reason || 'Channel rejected', event.code === 1009 ? 'LIMIT' : 'PROTOCOL'));
     } else this.peer.channelFailed();

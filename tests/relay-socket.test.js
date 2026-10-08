@@ -92,7 +92,7 @@ test('relay client reacquires a ticket after a clean remote close', async () => 
   expect(client.socket.readyState).toBe(1);
 });
 
-test('a legacy or invalid ready frame closes terminally', async () => {
+test('a legacy or invalid ready frame closes the channel as retryable', async () => {
   for (const ready of [{ type: 'avi-remote-ready', version: 1 }, { type: 'avi-remote-ready', version: 3 }, { type: 'avi-remote-ready', version: 3, protocol: 'avi-rpc-v1' }]) {
     const relay = new RelaySocket({ ...options, fetchImpl: async () => new Response(JSON.stringify(ticket()), { status: 201 }) });
     clients.push(relay);
@@ -101,19 +101,57 @@ test('a legacy or invalid ready frame closes terminally', async () => {
     await flush();
     Socket.instances.at(-1).open();
     Socket.instances.at(-1).message(ready);
-    expect(closed.retryable).toBe(false);
+    expect(closed.retryable).toBe(true);
     expect(closed.code).toBe(1008);
   }
 });
 
-for (const status of [401, 403]) test(`ticket ${status} is terminal`, async () => {
+for (const status of [400, 401, 403, 413]) test(`ticket ${status} closes as retryable without opening a socket`, async () => {
   const relay = new RelaySocket({ ...options, fetchImpl: async () => new Response('{}', { status }) });
   clients.push(relay);
   let closed;
   relay.addEventListener('close', (event) => { closed = event; });
   await flush();
-  expect(closed.retryable).toBe(false);
+  expect(closed.retryable).toBe(true);
   expect(Socket.instances).toHaveLength(0);
+});
+
+test('a relay client keeps retrying after an authorization rejection and recovers', async () => {
+  let tickets = 0;
+  const client = new RpcClient({ relay: { deviceId: 'device', accessToken: 'account-secret', fetchImpl: async () => (++tickets === 1 ? new Response('{}', { status: 401 }) : new Response(JSON.stringify(ticket()), { status: 201 })) }, WebSocketImpl: Socket });
+  clients.push(client);
+  client.connectUntilReady().catch(() => {});
+  await flush();
+  expect(client.closed).toBe(false);
+  await new Promise((resolve) => setTimeout(resolve, 8_100));
+  expect(tickets).toBe(2);
+  const socket = Socket.instances.at(-1);
+  socket.open();
+  socket.message({ type: 'avi-remote-ready', version: 3, protocol: ORPC_PROTOCOL });
+  await flush();
+  expect(client.closed).toBe(false);
+  expect(client.status.status).toBe('online');
+}, 15_000);
+
+test('paces a send burst below the relay message limit instead of closing', async () => {
+  const relay = new RelaySocket({ ...options, fetchImpl: async () => new Response(JSON.stringify(ticket()), { status: 201 }) });
+  clients.push(relay);
+  await flush();
+  const socket = Socket.instances.at(-1);
+  socket.open();
+  socket.message({ type: 'avi-remote-ready', version: 3, protocol: ORPC_PROTOCOL });
+  const times = [];
+  const send = socket.send.bind(socket);
+  socket.send = (data) => { times.push(Date.now()); send(data); };
+  for (let index = 0; index < 150; index++) relay.send(JSON.stringify({ index }));
+  expect(relay.readyState).toBe(1);
+  expect(times).toHaveLength(100);
+  expect(relay.bufferedAmount).toBeGreaterThanOrEqual(4 * 1024 * 1024);
+  await new Promise((resolve) => setTimeout(resolve, 1_100));
+  expect(times).toHaveLength(150);
+  expect(times[100] - times[0]).toBeGreaterThanOrEqual(1_000);
+  expect(socket.sent.slice(1).map((frame) => frame.index)).toEqual(Array.from({ length: 150 }, (_, index) => index));
+  expect(relay.readyState).toBe(1);
 });
 
 test('rejects ticket URL substitution and cancels stale ticket acquisition', async () => {
@@ -122,7 +160,9 @@ test('rejects ticket URL substitution and cancels stale ticket acquisition', asy
   let closed;
   relay.addEventListener('close', (event) => { closed = event; });
   await flush();
-  expect(closed.retryable).toBe(false);
+  expect(closed.code).toBe(1008);
+  expect(closed.retryable).toBe(true);
+  expect(Socket.instances).toHaveLength(0);
   let release;
   const canceled = new RelaySocket({ ...options, fetchImpl: () => new Promise((resolve) => { release = resolve; }) });
   clients.push(canceled);
@@ -133,7 +173,7 @@ test('rejects ticket URL substitution and cancels stale ticket acquisition', asy
   expect(Socket.instances).toHaveLength(0);
 });
 
-test('pending RPC recovers on a fresh channel with a fresh id, and Remote rejection stops retry', async () => {
+test('pending RPC recovers on a fresh channel with a fresh id, and Remote rejection keeps retrying', async () => {
   let tickets = 0;
   const client = new RpcClient({ relay: { deviceId: 'device', accessToken: 'account-secret', fetchImpl: async () => { tickets++; return new Response(JSON.stringify(ticket()), { status: 201 }); } }, WebSocketImpl: Socket });
   clients.push(client);
@@ -171,10 +211,10 @@ test('pending RPC recovers on a fresh channel with a fresh id, and Remote reject
   second.message(controlFrame('RES', `${retryAttempt[1]}#CHECKSEND`, await sha256Check(responseBytes)));
   expect(await pending).toEqual({ delivered: true });
 
-  // A v3 Remote rejection is terminal: no further reconnect or replay.
+  // A v3 Remote rejection restarts from a fresh peer after the longer backoff.
   second.message({ type: 'avi-remote-error', version: 3, code: 'unauthorized' });
-  expect(client.closed).toBe(true);
-  expect(client.reconnectTimer).toBeNull();
+  expect(client.closed).toBe(false);
+  expect(client.reconnectTimer).not.toBeNull();
 });
 
 test('heartbeat timeout closes silent consumer and matching pong maintains it', async () => {
@@ -269,8 +309,8 @@ test('a relay client retries an unknown remote close with a fresh ticket', async
   expect(client.socket.readyState).toBe(1);
 });
 
-test('unknown remote close codes stay retryable while protocol rejections do not', async () => {
-  for (const code of [1011, 4000, 4999]) {
+test('every remote close code is retryable', async () => {
+  for (const code of [1002, 1008, 1009, 1011, 4000, 4003, 4999]) {
     const relay = new RelaySocket({ ...options, fetchImpl: async () => new Response(JSON.stringify(ticket()), { status: 201 }) });
     clients.push(relay);
     await flush();
@@ -282,18 +322,5 @@ test('unknown remote close codes stay retryable while protocol rejections do not
     socket.close(code);
     expect(closed.code).toBe(code);
     expect(closed.retryable).toBe(true);
-  }
-  for (const code of [1002, 1008, 4003]) {
-    const relay = new RelaySocket({ ...options, fetchImpl: async () => new Response(JSON.stringify(ticket()), { status: 201 }) });
-    clients.push(relay);
-    await flush();
-    const socket = Socket.instances.at(-1);
-    socket.open();
-    socket.message({ type: 'avi-remote-ready', version: 3, protocol: ORPC_PROTOCOL });
-    let closed;
-    relay.addEventListener('close', (event) => { closed = event; });
-    socket.close(code);
-    expect(closed.code).toBe(code);
-    expect(closed.retryable).toBe(false);
   }
 });
