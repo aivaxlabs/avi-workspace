@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- Read-only permission mode in the Composer and in bot create/edit forms, which now send the persisted bot `permissionMode`; unknown Composer values still fall back to "Approve for me".
+- Chat search lists the 20 most recently updated threads before a query is typed and uses the object `conversations:search` payload.
+- "Archive all" in the sidebar Working group, sent through `conversations:archive` with an ID array, and agent-created threads that stay listed while they await an approval or an answer, are blocked, or need attention without a running turn.
+- Auxiliary panel Stats tab backed by `chat:statistics`: latency percentiles, output speed, token totals, request outcomes, and tool-call failures.
+
+### Changed
+
+- Goal strips show transacted tokens while the Goal is active or paused instead of only after it ends.
+
 ### Fixed
 
 - Relay connections retry automatically after every failure, including AIVAX authorization rejections, invalid tickets or handshakes, Remote rejections, and close codes `1002`, `1008`, `1009`, and `4003`; severe failures use a longer backoff instead of stopping. Direct connections still pause on authentication rejection.
