@@ -409,8 +409,11 @@ export function WorkspacePage({ connection, globalClient, discovery, models, las
       if (selectResult) {
         const id = selectResult(result);
         if (id) selectConversation(id);
-      } else if ([METHODS.archiveConversation, METHODS.deleteConversation].includes(method) && params.payload === selectedIdRef.current) {
-        selectConversation(conversations.find((item) => item.id !== params.payload)?.id ?? null);
+      } else if ([METHODS.archiveConversation, METHODS.deleteConversation].includes(method)) {
+        const removed = [params.payload].flat();
+        if (removed.includes(selectedIdRef.current)) {
+          selectConversation(conversations.find((item) => !removed.includes(item.id))?.id ?? null);
+        }
       }
       return result;
     } catch (value) {
@@ -436,7 +439,7 @@ export function WorkspacePage({ connection, globalClient, discovery, models, las
     sidebarStatus: supportsMethod(discovery, METHODS.sidebarStatus) ? sidebarStatus : undefined,
     tags: supportsMethod(discovery, METHODS.listTags) ? tags : undefined,
     onActivateBot: supportsMethod(discovery, METHODS.activateBot) ? (bot) => runSidebarAction(METHODS.activateBot, { payload: bot.id }) : undefined,
-    onArchive: supportsMethod(discovery, METHODS.archiveConversation) ? (item) => runSidebarAction(METHODS.archiveConversation, { payload: item.id }) : undefined,
+    onArchive: supportsMethod(discovery, METHODS.archiveConversation) ? (items) => runSidebarAction(METHODS.archiveConversation, { payload: items.map((item) => item.id) }) : undefined,
     onCreate: supportsMethod(discovery, METHODS.createConversation) ? createConversation : undefined,
     onCreateBot: supportsMethod(discovery, METHODS.createBot) ? (input) => runSidebarAction(METHODS.createBot, input) : undefined,
     onDelete: supportsMethod(discovery, METHODS.deleteConversation) ? (item) => runSidebarAction(METHODS.deleteConversation, { payload: item.id }) : undefined,

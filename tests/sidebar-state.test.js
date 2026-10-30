@@ -46,6 +46,20 @@ describe('sidebar state projections', () => {
     expect(filterSidebarConversations(conversations, { activeTagIds: ['red'], showAgentCreatedThreads: true }).map(({ id }) => id)).toEqual(['agent']);
   });
 
+  test('keeps agent conversations that need attention without the agent filter', () => {
+    const items = [
+      { id: 'idle', title: 'Idle agent', createdBy: 'agent', updatedAt: '2026-09-01T00:00:00Z' },
+      { id: 'approval', title: 'Approval', createdBy: 'agent', updatedAt: '2026-09-01T00:00:00Z' },
+      { id: 'input', title: 'Input', createdBy: 'agent', updatedAt: '2026-09-01T00:00:00Z' },
+      { id: 'blocked', title: 'Blocked', createdBy: 'agent', workStatus: 'blocked', updatedAt: '2026-09-01T00:00:00Z' },
+      { id: 'attention', title: 'Attention', createdBy: 'agent', needsAttention: true, updatedAt: '2026-09-01T00:00:00Z' },
+      { id: 'running', title: 'Running', createdBy: 'agent', needsAttention: true, updatedAt: '2026-09-01T00:00:00Z' },
+    ];
+    const snapshot = { approvalPending: ['approval'], inputPending: ['input'], running: ['running'] };
+    expect(filterSidebarConversations(items, { snapshot }).map(({ id }) => id)).toEqual(['approval', 'input', 'blocked', 'attention']);
+    expect(deriveTaskGroups(items, snapshot).working.map(({ id }) => id)).toEqual(['approval', 'input', 'blocked', 'attention']);
+  });
+
   test('derives conversation status with desktop precedence', () => {
     const snapshot = {
       running: { c: true },
