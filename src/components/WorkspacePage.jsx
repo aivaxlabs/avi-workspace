@@ -446,7 +446,7 @@ export function WorkspacePage({ connection, globalClient, discovery, models, las
     onRename: supportsMethod(discovery, METHODS.updateConversation) ? (item, title) => runSidebarAction(METHODS.updateConversation, { id: item.id, title }) : undefined,
     onSaveFolderColor: supportsMethod(discovery, METHODS.saveFolderColor) ? (folder, color) => runSidebarAction(METHODS.saveFolderColor, { path: folder.path, color }) : undefined,
     onSaveTags: supportsMethod(discovery, METHODS.saveTags) ? (nextTags) => runSidebarAction(METHODS.saveTags, { tags: nextTags }) : undefined,
-    onSearch: supportsMethod(discovery, METHODS.searchConversations) ? (query) => globalClient.request(METHODS.searchConversations, { payload: query }) : undefined,
+    onSearch: supportsMethod(discovery, METHODS.searchConversations) ? (payload) => globalClient.request(METHODS.searchConversations, { payload }) : undefined,
     onSelect: selectConversation,
     onSetConversationTags: supportsMethod(discovery, METHODS.setConversationTags) ? (item, nextTags) => runSidebarAction(METHODS.setConversationTags, { conversationId: item.id, tags: nextTags }) : undefined,
     onSnoozeBot: supportsMethod(discovery, METHODS.snoozeBot) ? (bot, options) => runSidebarAction(METHODS.snoozeBot, { botId: bot.id, options }) : undefined,

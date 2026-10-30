@@ -271,6 +271,39 @@ describe('sidebar dialogs and actions', () => {
     expect(root.querySelector('.search-results').textContent).toContain('Matched content');
   });
 
+  test('search lists recent threads before a query and sends an object payload', async () => {
+    const payloads = [];
+    root = document.createElement('div');
+    document.body.append(root);
+    act(() => render(h(SidebarSearchDialog, {
+      onSearch: (payload) => {
+        payloads.push(payload);
+        return Promise.resolve([{
+          conversationId: payload.query ? 'review' : 'working',
+          title: payload.query ? 'Review thread' : 'Working thread',
+          folderName: 'avi',
+          content: payload.query ? 'Matched content' : 'Recent prompt',
+        }]);
+      },
+      onSelect() {},
+      onClose() {},
+    }), root));
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 240)));
+    expect(payloads).toEqual([{ query: '' }]);
+    expect(root.querySelector('.search-results-label').textContent).toContain('Recent chats');
+    expect(root.querySelector('.search-results').textContent).toContain('Recent prompt');
+
+    act(() => {
+      const input = root.querySelector('input');
+      input.value = 'review';
+      input.dispatchEvent(new window.Event('input', { bubbles: true }));
+    });
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 240)));
+    expect(payloads).toEqual([{ query: '' }, { query: 'review' }]);
+    expect(root.querySelector('.search-results-label').textContent).toContain('Results');
+    expect(root.querySelector('.search-results').textContent).toContain('Matched content');
+  });
+
   test('copy thread ID reports success and failure next to the sidebar', async () => {
     const calls = mountSidebar({ props: { onFork: (item) => calls.push(['fork', item.id]) } });
     act(() => workingThreadRow().querySelector('.thread-menu').click());

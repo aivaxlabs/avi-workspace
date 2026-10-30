@@ -57,17 +57,10 @@ export function SidebarSearchDialog({ onSearch, onSelect, onClose }) {
   const tokenRef = useRef(0);
 
   function searchNow() {
-    const trimmed = query.trim();
-    if (!trimmed) {
-      setResults([]);
-      setSearching(false);
-      setError('');
-      return;
-    }
     const token = ++tokenRef.current;
     setSearching(true);
     setError('');
-    Promise.resolve(onSearch(trimmed)).then((found) => {
+    Promise.resolve(onSearch({ query: query.trim() })).then((found) => {
       if (token !== tokenRef.current) return;
       setResults(normalizeSearchResults(found));
       setSelected(0);
@@ -132,7 +125,7 @@ export function SidebarSearchDialog({ onSearch, onSelect, onClose }) {
         />
         {searching ? <i class="ri-loader-4-line spinning" role="status" aria-label="Searching" /> : <kbd>Esc</kbd>}
       </label>
-      {query.trim() && (error && !searching ? (
+      {error && !searching ? (
         <div class="search-error" role="alert">
           <i class="ri-error-warning-line" aria-hidden="true" />
           <span>Could not search: {error}</span>
@@ -140,7 +133,7 @@ export function SidebarSearchDialog({ onSearch, onSelect, onClose }) {
         </div>
       ) : (
         <div ref={resultsRef} id="sidebar-search-results" class="search-results" role="listbox" aria-label="Chat search results">
-          {!searching && results.length > 0 && <div class="search-results-label">Results<span>{results.length}</span></div>}
+          {!searching && results.length > 0 && <div class="search-results-label">{query.trim() ? 'Results' : 'Recent chats'}<span>{results.length}</span></div>}
           {results.map((result, index) => (
             <button
               key={result.conversationId}
@@ -165,10 +158,10 @@ export function SidebarSearchDialog({ onSearch, onSelect, onClose }) {
             </button>
           ))}
           {!searching && results.length === 0 && (
-            <div class="search-empty"><i class="ri-search-line" aria-hidden="true" /><span>No chats found for that query.</span></div>
+            <div class="search-empty"><i class="ri-search-line" aria-hidden="true" /><span>{query.trim() ? 'No chats found for that query.' : 'No chats yet.'}</span></div>
           )}
         </div>
-      ))}
+      )}
     </DialogShell>
   );
 }
