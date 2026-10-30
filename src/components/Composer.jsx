@@ -3,17 +3,12 @@ import { createPortal } from 'preact/compat';
 import { useModalFocus } from '../lib/use-modal-focus.js';
 import { METHODS, supportsMethod } from '../rpc/contracts.js';
 import { moveQueueId, steerQueuedParams } from '../lib/queue-actions.js';
+import { PERMISSION_OPTIONS } from '../lib/permissions.js';
 
 const BUILT_INS = [
   { name: 'stop', description: 'Stop the active run' },
   { name: 'side', description: 'Open a side chat' },
 ];
-const PERMISSIONS = [
-  { id: 'ask_for_approval', label: 'Ask for approval', description: 'Ask before every tool call', icon: 'ri-shield-keyhole-line' },
-  { id: 'approve_for_me', label: 'Approve for me', description: 'Ask only before destructive actions', icon: 'ri-shield-check-line' },
-  { id: 'full_access', label: 'Full access', description: 'Run tool calls without approval', icon: 'ri-shield-flash-line' },
-];
-
 const AUTOSAVE_DEBOUNCE_MS = 300;
 const FILE_SIZE_LIMIT = 10 * 1024 * 1024;
 
@@ -141,7 +136,7 @@ export function Composer({ client, state, models, lastModel, discovery, draftCac
   const effortSubmenuRef = useRef(null);
   const invocation = useMemo(() => text.match(/(?:^|\s)([@/$])([^\s]*)$/), [text]);
   const selectedModel = models.find((item) => item.id === model);
-  const permission = PERMISSIONS.find((item) => item.id === permissionMode) ?? PERMISSIONS[1];
+  const permission = PERMISSION_OPTIONS.find((item) => item.id === permissionMode) ?? PERMISSION_OPTIONS.find((item) => item.id === 'approve_for_me');
   const contextPercent = state.contextUsage.limit
     ? Math.min(100, Math.round((state.contextUsage.tokens / state.contextUsage.limit) * 100))
     : null;
@@ -655,8 +650,8 @@ export function Composer({ client, state, models, lastModel, discovery, draftCac
             <button type="button" role="menuitem" disabled={attachmentsDisabled} onClick={() => { cameraInput.current?.click(); setOpenMenu(null); }}><i class="ri-camera-line" />Take photo</button>
             <button type="button" role="menuitem" disabled={attachmentsDisabled} onClick={() => { videoInput.current?.click(); setOpenMenu(null); }}><i class="ri-video-line" />Record video</button>
             {canRecordAudio && <button type="button" role="menuitem" disabled={attachmentsDisabled} onClick={() => { setOpenMenu(null); root.current?.querySelector('textarea')?.blur(); setAudioOpen(true); }}><i class="ri-mic-line" />Record audio</button>}
-          </>}<button type="button" role="menuitemcheckbox" aria-checked={ultraMode} onClick={() => { setUltraMode(!ultraMode); setWorkMode(null); setOpenMenu(null); }}><i class="ri-flashlight-line" />Ultra</button><button type="button" role="menuitemcheckbox" aria-checked={workMode === 'goal'} onClick={() => { setWorkMode(workMode === 'goal' ? null : 'goal'); setUltraMode(false); setOpenMenu(null); }}><i class="ri-focus-3-line" />Goal</button><button type="button" role="menuitemcheckbox" aria-checked={workMode === 'plan'} onClick={() => { setWorkMode(workMode === 'plan' ? null : 'plan'); setUltraMode(false); setOpenMenu(null); }}><i class="ri-list-check-3" />Plan</button><button type="button" role="menuitem" disabled={!supportsMethod(discovery, METHODS.createSideChat)} onClick={() => { setOpenMenu(null); Promise.resolve().then(onSideChat).catch(onError); }}><i class="ri-chat-new-line" />Side chat</button><span class="mobile-permission-label">Permission</span><div class="mobile-permission-options">{PERMISSIONS.map((item) => <button key={item.id} type="button" role="menuitemradio" aria-checked={item.id === permissionMode} onClick={() => { setPermissionMode(item.id); setOpenMenu(null); }}><i class={item.icon} /><span><strong>{item.label}</strong><small>{item.description}</small></span></button>)}</div></div>}</div>
-          <div class="composer-menu-holder permission-control"><button type="button" class="control-chip" aria-haspopup="menu" aria-expanded={openMenu === 'permission'} onClick={() => setOpenMenu(openMenu === 'permission' ? null : 'permission')}><i class={permission.icon} /><span>{permission.label}</span><i class="ri-arrow-down-s-line" /></button>{openMenu === 'permission' && <div class="composer-menu permission-menu" role="menu">{PERMISSIONS.map((item) => <button key={item.id} type="button" role="menuitemradio" aria-checked={item.id === permissionMode} onClick={() => { setPermissionMode(item.id); setOpenMenu(null); }}><i class={item.icon} /><span><strong>{item.label}</strong><small>{item.description}</small></span></button>)}</div>}</div>
+          </>}<button type="button" role="menuitemcheckbox" aria-checked={ultraMode} onClick={() => { setUltraMode(!ultraMode); setWorkMode(null); setOpenMenu(null); }}><i class="ri-flashlight-line" />Ultra</button><button type="button" role="menuitemcheckbox" aria-checked={workMode === 'goal'} onClick={() => { setWorkMode(workMode === 'goal' ? null : 'goal'); setUltraMode(false); setOpenMenu(null); }}><i class="ri-focus-3-line" />Goal</button><button type="button" role="menuitemcheckbox" aria-checked={workMode === 'plan'} onClick={() => { setWorkMode(workMode === 'plan' ? null : 'plan'); setUltraMode(false); setOpenMenu(null); }}><i class="ri-list-check-3" />Plan</button><button type="button" role="menuitem" disabled={!supportsMethod(discovery, METHODS.createSideChat)} onClick={() => { setOpenMenu(null); Promise.resolve().then(onSideChat).catch(onError); }}><i class="ri-chat-new-line" />Side chat</button><span class="mobile-permission-label">Permission</span><div class="mobile-permission-options">{PERMISSION_OPTIONS.map((item) => <button key={item.id} type="button" role="menuitemradio" aria-checked={item.id === permissionMode} onClick={() => { setPermissionMode(item.id); setOpenMenu(null); }}><i class={item.icon} /><span><strong>{item.label}</strong><small>{item.description}</small></span></button>)}</div></div>}</div>
+          <div class="composer-menu-holder permission-control"><button type="button" class="control-chip" aria-haspopup="menu" aria-expanded={openMenu === 'permission'} onClick={() => setOpenMenu(openMenu === 'permission' ? null : 'permission')}><i class={permission.icon} /><span>{permission.label}</span><i class="ri-arrow-down-s-line" /></button>{openMenu === 'permission' && <div class="composer-menu permission-menu" role="menu">{PERMISSION_OPTIONS.map((item) => <button key={item.id} type="button" role="menuitemradio" aria-checked={item.id === permissionMode} onClick={() => { setPermissionMode(item.id); setOpenMenu(null); }}><i class={item.icon} /><span><strong>{item.label}</strong><small>{item.description}</small></span></button>)}</div>}</div>
           {workMode && <button type="button" class="mode-chip" onClick={() => setWorkMode(null)}><i class={workMode === 'goal' ? 'ri-focus-3-line' : 'ri-list-check-3'} />{workMode === 'goal' ? 'Goal' : 'Plan'}<i class="ri-close-line" /></button>}
           {ultraMode && <button type="button" class="mode-chip" onClick={() => setUltraMode(false)}><i class="ri-flashlight-line" />Ultra<i class="ri-close-line" /></button>}
         </div>

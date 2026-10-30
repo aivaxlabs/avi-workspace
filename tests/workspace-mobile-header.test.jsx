@@ -248,8 +248,9 @@ describe('workspace mobile shell', () => {
 
     act(() => root.querySelector('[aria-label="Composer actions"]').click());
     const permissionOptions = root.querySelectorAll('.mobile-permission-options [role="menuitemradio"]');
-    expect(permissionOptions).toHaveLength(3);
+    expect(permissionOptions).toHaveLength(4);
     expect([...permissionOptions].map((button) => button.textContent)).toEqual([
+      'Read-onlyOnly read and search; never modify',
       'Ask for approvalAsk before every tool call',
       'Approve for meAsk only before destructive actions',
       'Full accessRun tool calls without approval',

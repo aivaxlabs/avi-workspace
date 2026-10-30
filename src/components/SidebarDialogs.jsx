@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { normalizeSearchResults } from '../lib/sidebar-state.js';
+import { BOT_PERMISSIONS } from '../lib/permissions.js';
 import { useModalFocus } from '../lib/use-modal-focus.js';
 
 const TAG_COLORS = Object.freeze(['#e5484d', '#f76b15', '#e3b341', '#46a758', '#12a594', '#3e9df0', '#3e63dd', '#8e4ec6', '#d6409f', '#8b8d98']);
@@ -231,13 +232,14 @@ export function SidebarBotDialog({ bot = null, models = [], folders = [], busy =
   const [name, setName] = useState(bot?.name ?? '');
   const [model, setModel] = useState(bot?.model ?? models[0]?.id ?? '');
   const [workingFolder, setWorkingFolder] = useState(bot?.workingFolder ?? '');
+  const [permissionMode, setPermissionMode] = useState(BOT_PERMISSIONS.some((option) => option.id === bot?.permissionMode) ? bot.permissionMode : 'approve_for_me');
   const [enabled, setEnabled] = useState(bot?.enabled ?? true);
   const nameInputRef = useRef(null);
 
   function submit(event) {
     event.preventDefault();
     if (busy || !name.trim()) return;
-    onSubmit({ name: name.trim(), model, workingFolder: workingFolder || null, enabled });
+    onSubmit({ name: name.trim(), model, workingFolder: workingFolder || null, permissionMode, enabled });
   }
 
   return (
@@ -255,6 +257,11 @@ export function SidebarBotDialog({ bot = null, models = [], folders = [], busy =
           <select value={workingFolder} onChange={(event) => setWorkingFolder(event.currentTarget.value)}>
             <option value="">Default working folder</option>
             {folders.map((folder) => <option key={folder.path} value={folder.path}>{folder.displayPath ?? folder.path}</option>)}
+          </select>
+        </label>
+        <label>Tool permissions
+          <select value={permissionMode} onChange={(event) => setPermissionMode(event.currentTarget.value)}>
+            {BOT_PERMISSIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
           </select>
         </label>
         <label class="check">

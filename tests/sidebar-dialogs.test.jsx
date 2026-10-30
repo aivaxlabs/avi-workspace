@@ -347,7 +347,8 @@ describe('sidebar dialogs and actions', () => {
   test('bot creation reports busy and keeps the dialog open on failure', async () => {
     let resolveCreate;
     let createCalls = 0;
-    mountSidebar({ props: { onCreateBot: () => new Promise((resolve) => { createCalls += 1; resolveCreate = resolve; }) } });
+    let created = null;
+    mountSidebar({ props: { onCreateBot: (input) => new Promise((resolve) => { createCalls += 1; created = input; resolveCreate = resolve; }) } });
     act(() => root.querySelector('[aria-label="New bot"]').click());
     const form = root.querySelector('.bot-form');
     const nameInput = form.querySelector('input[type="text"]');
@@ -355,9 +356,15 @@ describe('sidebar dialogs and actions', () => {
       nameInput.value = 'Deploy bot';
       nameInput.dispatchEvent(new window.Event('input', { bubbles: true }));
     });
+    const permissionSelect = [...form.querySelectorAll('label')].find((label) => label.textContent.includes('Tool permissions')).querySelector('select');
+    act(() => {
+      permissionSelect.value = 'read_only';
+      permissionSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
+    });
     act(() => form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })));
     await flush();
     expect(createCalls).toBe(1);
+    expect(created.permissionMode).toBe('read_only');
     expect(buttonWithText(form, 'Create bot').disabled).toBeTrue();
     act(() => form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })));
     await flush();
@@ -380,6 +387,33 @@ describe('sidebar dialogs and actions', () => {
     expect(root.querySelector('.bot-form')).not.toBeNull();
     act(() => buttonWithText(root.querySelector('.bot-form'), 'Cancel').click());
     expect(root.querySelector('.bot-form')).toBeNull();
+  });
+
+  test('bot editing keeps the persisted tool permission mode and defaults to approve for me', async () => {
+    const calls = mountSidebar({
+      bots: [
+        { id: 'bot-1', name: 'Read bot', model: 'model:one', enabled: true, scheduleState: 'active', permissionMode: 'read_only' },
+        { id: 'bot-2', name: 'Legacy bot', model: 'model:one', enabled: true, scheduleState: 'active' },
+      ],
+      props: { onUpdateBot: (bot, changes) => calls.push(['update-bot', bot.id, changes]) },
+    });
+
+    function openBotForm(name) {
+      act(() => root.querySelector(`[aria-label="Actions for ${name}"]`).click());
+      act(() => buttonWithText(document.body.querySelector('.sidebar-menu'), 'Edit...').click());
+      const form = root.querySelector('.bot-form');
+      return { form, permissionSelect: [...form.querySelectorAll('label')].find((label) => label.textContent.includes('Tool permissions')).querySelector('select') };
+    }
+
+    const legacy = openBotForm('Legacy bot');
+    expect(legacy.permissionSelect.value).toBe('approve_for_me');
+    act(() => buttonWithText(legacy.form, 'Cancel').click());
+
+    const persisted = openBotForm('Read bot');
+    expect(persisted.permissionSelect.value).toBe('read_only');
+    act(() => persisted.form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })));
+    await flush();
+    expect(calls).toEqual([['update-bot', 'bot-1', { name: 'Read bot', model: 'model:one', workingFolder: null, permissionMode: 'read_only', enabled: true }]]);
   });
 
   test('conversation menus support arrow, home, and end keyboard navigation', async () => {

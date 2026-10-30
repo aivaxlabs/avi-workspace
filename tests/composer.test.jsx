@@ -967,9 +967,15 @@ describe('composer parity', () => {
     expect(calls.find((call) => call.method === METHODS.cancelQueued)?.params).toEqual({ messageId: 's1' });
 
     act(() => buttonWithText(root, 'Full access').click());
+    expect(root.querySelector('.permission-menu').textContent).toContain('Read-only');
     expect(root.querySelector('.permission-menu').textContent).toContain('Ask only before destructive actions');
     act(() => buttonWithText(root.querySelector('.permission-menu'), 'Approve for me').click());
     expect(buttonWithText(root, 'Approve for me')).toBeTruthy();
+
+    act(() => buttonWithText(root, 'Approve for me').click());
+    act(() => buttonWithText(root.querySelector('.permission-menu'), 'Read-only').click());
+    expect(root.querySelector('.permission-control > button').textContent).toContain('Read-only');
+    expect(root.querySelector('.permission-control > button > i').classList.contains('ri-eye-line')).toBe(true);
 
     act(() => buttonWithText(root, 'Model One').click());
     expect(root.querySelector('.advanced-menu-header').textContent).toContain('Advanced');
