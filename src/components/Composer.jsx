@@ -37,10 +37,10 @@ export function Composer({ client, state, models, lastModel, discovery, draftCac
     goal?.status === 'active' && Number.isFinite(resumedAt) ? Math.max(0, goalNow - resumedAt) : 0
   )) / 1000);
   const goalElapsedLabel = [Math.floor(goalElapsedSeconds / 3600), Math.floor((goalElapsedSeconds % 3600) / 60), goalElapsedSeconds % 60].map((part) => String(part).padStart(2, '0')).join(':');
-  const finishedGoalTokens = ['completed', 'blocked', 'cancelled'].includes(goal?.status) ? goal.tokensTransacted ?? 0 : 0;
-  const goalTokenLabel = finishedGoalTokens >= 1_000_000
-    ? `${(finishedGoalTokens / 1_000_000).toFixed(finishedGoalTokens >= 10_000_000 ? 0 : 1)}M`
-    : finishedGoalTokens >= 1_000 ? `${Math.round(finishedGoalTokens / 1_000)}K` : String(finishedGoalTokens);
+  const goalTokens = Number(goal?.tokensTransacted) || 0;
+  const goalTokenLabel = goalTokens >= 1_000_000
+    ? `${(goalTokens / 1_000_000).toFixed(goalTokens >= 10_000_000 ? 0 : 1)}M`
+    : goalTokens >= 1_000 ? `${Math.round(goalTokens / 1_000)}K` : String(goalTokens);
   const localCache = useRef(new Map());
   draftCache ??= localCache.current;
   const [queueOpen, setQueueOpen] = useState(false);
@@ -495,7 +495,7 @@ export function Composer({ client, state, models, lastModel, discovery, draftCac
         <i class={goal.status === 'completed' ? 'ri-check-line' : goal.status === 'blocked' ? 'ri-shield-question-line' : goal.status === 'cancelled' ? 'ri-close-line' : 'ri-focus-3-line'} aria-hidden="true" />
         <span class="goal-strip-copy">
           <strong title={goal.specification}>{goal.specification}</strong>
-          <small><i class="ri-time-line" aria-hidden="true" /><span>{goalElapsedLabel}</span><span aria-hidden="true">·</span><span>{goalStatus}</span>{finishedGoalTokens > 0 && <><span aria-hidden="true">·</span><span aria-label={`${finishedGoalTokens} tokens`}>{goalTokenLabel}</span></>}</small>
+          <small><i class="ri-time-line" aria-hidden="true" /><span>{goalElapsedLabel}</span><span aria-hidden="true">·</span><span>{goalStatus}</span>{goalTokens > 0 && <><span aria-hidden="true">·</span><span aria-label={`${goalTokens} tokens`}>{goalTokenLabel}</span></>}</small>
         </span>
       </section>}
       {state.tasks.length > 0 && <button type="button" class="composer-strip" onClick={onOpenTasks}><i class="ri-list-check-3" /><span>{state.tasks.filter((task) => task.done).length}/{state.tasks.length} tasks completed</span><i class="ri-arrow-right-s-line" /></button>}

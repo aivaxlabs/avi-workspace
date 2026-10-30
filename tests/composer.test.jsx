@@ -114,7 +114,7 @@ function mount(state = createState(), overrides = {}) {
   };
 }
 
-test('shows Goal progression, terminal tokens, and clears it on thread change', () => {
+test('shows Goal progression, live tokens, and clears it on thread change', () => {
   const state = createState();
   const goal = { specification: 'Deliver the requested feature', status: 'paused', activeElapsedMs: 3_661_000, resumedAt: null, tokensTransacted: 12500 };
   state.conversation.goal = goal;
@@ -124,7 +124,7 @@ test('shows Goal progression, terminal tokens, and clears it on thread change', 
     expect(strip.textContent).toContain(goal.specification);
     expect(strip.textContent).toContain('01:01:01');
     expect(strip.textContent).toContain('Paused');
-    expect(strip.querySelector('[aria-label="12500 tokens"]')).toBeNull();
+    expect(strip.querySelector('[aria-label="12500 tokens"]').textContent).toBe('13K');
     expect(view.root.querySelector('.composer-strips').firstElementChild).toBe(strip);
     for (const [status, label] of [['completed', 'Completed'], ['blocked', 'Blocked'], ['cancelled', 'Stopped']]) {
       view.rerender({ ...state, conversation: { ...state.conversation, goal: { ...goal, status } } });
