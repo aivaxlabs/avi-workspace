@@ -1668,6 +1668,59 @@
   }
 }
 
+.statistics-list {
+  > header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 7px;
+
+    > h2 {
+      flex: 1;
+      margin: 0;
+      color: --text-muted;
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+
+    > button {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 8px;
+      border-radius: 4px;
+      background: --item-hover;
+      color: --text-secondary;
+      font-size: 11px;
+    }
+  }
+
+  > div {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px;
+    border-bottom: 1px solid --border-color;
+
+    > span {
+      min-width: 0;
+      display: grid;
+      gap: 2px;
+
+      > small {
+        color: --text-muted;
+      }
+    }
+
+    > b {
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+      font-weight: 500;
+    }
+  }
+}
+
 .task-list {
   margin: 0;
   padding: 0;

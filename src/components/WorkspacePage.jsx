@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/ho
 import { Composer } from './Composer.jsx';
 import { ConversationSidebar } from './ConversationSidebar.jsx';
 import { RichMessage } from './RichMessage.jsx';
+import { ThreadStatistics } from './ThreadStatistics.jsx';
 import { METHODS, HISTORY_PAGE_SIZE, normalizeModelsResult, supportsMethod, validateDiscovery } from '../rpc/contracts.js';
 import { createOlderHistoryRequest, normalizeMessagePage } from '../rpc/pagination.js';
 import { applyConversationEvent, prependOlderMessages, recoverConversationState, refreshConversationProjection } from '../state/conversation.js';
@@ -50,7 +51,7 @@ function Question({ item, client, onDone, onError, discovery }) {
 }
 
 function AuxiliaryPanel({ tab, state, client, discovery, modal, panelRef, onOpenConversation, onClose, onTab, onApprovalDone, onQuestionDone, onQueueOrder, onSemaphoreDone }) {
-  const tabs = [['tasks', 'Tasks'], ['agents', 'Agents'], ['side', 'Side chats'], ['permissions', 'Attention']];
+  const tabs = [['tasks', 'Tasks'], ['agents', 'Agents'], ['side', 'Side chats'], ['permissions', 'Attention'], ...(supportsMethod(discovery, METHODS.chatStatistics) ? [['stats', 'Stats']] : [])];
   const tabRefs = useRef([]);
   const submitting = useRef(false);
   const [busy, setBusy] = useState(false);
@@ -86,6 +87,7 @@ function AuxiliaryPanel({ tab, state, client, discovery, modal, panelRef, onOpen
     {tab === 'agents' && (state.subagents.length || state.rubberDucks.length ? <ul class="thread-list compact">{state.subagents.map((item) => <li><button onClick={() => onOpenConversation(item.id)}><i class="ri-git-branch-line" /><span><strong>{item.title}</strong><small>{item.workStatus ?? 'Sub-agent'}</small></span></button></li>)}{state.rubberDucks.map((item) => <li><button onClick={() => onOpenConversation(item.id)}><i class="ri-chat-smile-2-line" /><span><strong>{item.title}</strong><small>Rubber Duck</small></span></button></li>)}</ul> : <p class="panel-empty">No sub-agents or Rubber Ducks have been created.</p>)}
     {tab === 'side' && (state.sideChats.length ? <ul class="thread-list compact">{state.sideChats.map((item) => <li><button onClick={() => onOpenConversation(item.id)}><i class="ri-chat-1-line" /><span><strong>{item.title}</strong><small>Side chat</small></span></button></li>)}</ul> : <p class="panel-empty">No side chats for this thread.</p>)}
     {tab === 'permissions' && <>{state.approvals.map((item) => <Approval key={item.approvalId} item={item} client={client} discovery={discovery} onDone={() => onApprovalDone(item.approvalId)} onError={(error) => setActionError(error.message)} />)}{state.questions.map((item) => <Question key={item.questionId} item={item} client={client} discovery={discovery} onDone={() => onQuestionDone(item.questionId)} onError={(error) => setActionError(error.message)} />)}{!state.approvals.length && !state.questions.length && <p class="panel-empty">Nothing needs attention.</p>}</>}
+    {tab === 'stats' && <ThreadStatistics client={client} discovery={discovery} />}
   </div></aside>;
 }
 
