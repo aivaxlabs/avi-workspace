@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/ho
 import { Composer } from './Composer.jsx';
 import { ConversationSidebar } from './ConversationSidebar.jsx';
 import { RichMessage } from './RichMessage.jsx';
+import { ThreadStatistics } from './ThreadStatistics.jsx';
 import { METHODS, HISTORY_PAGE_SIZE, normalizeModelsResult, supportsMethod, validateDiscovery } from '../rpc/contracts.js';
 import { createOlderHistoryRequest, normalizeMessagePage } from '../rpc/pagination.js';
 import { applyConversationEvent, prependOlderMessages, recoverConversationState, refreshConversationProjection } from '../state/conversation.js';
@@ -50,7 +51,7 @@ function Question({ item, client, onDone, onError, discovery }) {
 }
 
 function AuxiliaryPanel({ tab, state, client, discovery, modal, panelRef, onOpenConversation, onClose, onTab, onApprovalDone, onQuestionDone, onQueueOrder, onSemaphoreDone }) {
-  const tabs = [['tasks', 'Tasks'], ['agents', 'Agents'], ['side', 'Side chats'], ['permissions', 'Attention']];
+  const tabs = [['tasks', 'Tasks'], ['agents', 'Agents'], ['side', 'Side chats'], ['permissions', 'Attention'], ...(supportsMethod(discovery, METHODS.chatStatistics) ? [['stats', 'Stats']] : [])];
   const tabRefs = useRef([]);
   const submitting = useRef(false);
   const [busy, setBusy] = useState(false);
@@ -86,6 +87,7 @@ function AuxiliaryPanel({ tab, state, client, discovery, modal, panelRef, onOpen
     {tab === 'agents' && (state.subagents.length || state.rubberDucks.length ? <ul class="thread-list compact">{state.subagents.map((item) => <li><button onClick={() => onOpenConversation(item.id)}><i class="ri-git-branch-line" /><span><strong>{item.title}</strong><small>{item.workStatus ?? 'Sub-agent'}</small></span></button></li>)}{state.rubberDucks.map((item) => <li><button onClick={() => onOpenConversation(item.id)}><i class="ri-chat-smile-2-line" /><span><strong>{item.title}</strong><small>Rubber Duck</small></span></button></li>)}</ul> : <p class="panel-empty">No sub-agents or Rubber Ducks have been created.</p>)}
     {tab === 'side' && (state.sideChats.length ? <ul class="thread-list compact">{state.sideChats.map((item) => <li><button onClick={() => onOpenConversation(item.id)}><i class="ri-chat-1-line" /><span><strong>{item.title}</strong><small>Side chat</small></span></button></li>)}</ul> : <p class="panel-empty">No side chats for this thread.</p>)}
     {tab === 'permissions' && <>{state.approvals.map((item) => <Approval key={item.approvalId} item={item} client={client} discovery={discovery} onDone={() => onApprovalDone(item.approvalId)} onError={(error) => setActionError(error.message)} />)}{state.questions.map((item) => <Question key={item.questionId} item={item} client={client} discovery={discovery} onDone={() => onQuestionDone(item.questionId)} onError={(error) => setActionError(error.message)} />)}{!state.approvals.length && !state.questions.length && <p class="panel-empty">Nothing needs attention.</p>}</>}
+    {tab === 'stats' && <ThreadStatistics client={client} discovery={discovery} />}
   </div></aside>;
 }
 
@@ -409,8 +411,11 @@ export function WorkspacePage({ connection, globalClient, discovery, models, las
       if (selectResult) {
         const id = selectResult(result);
         if (id) selectConversation(id);
-      } else if ([METHODS.archiveConversation, METHODS.deleteConversation].includes(method) && params.payload === selectedIdRef.current) {
-        selectConversation(conversations.find((item) => item.id !== params.payload)?.id ?? null);
+      } else if ([METHODS.archiveConversation, METHODS.deleteConversation].includes(method)) {
+        const removed = [params.payload].flat();
+        if (removed.includes(selectedIdRef.current)) {
+          selectConversation(conversations.find((item) => !removed.includes(item.id))?.id ?? null);
+        }
       }
       return result;
     } catch (value) {
@@ -436,7 +441,7 @@ export function WorkspacePage({ connection, globalClient, discovery, models, las
     sidebarStatus: supportsMethod(discovery, METHODS.sidebarStatus) ? sidebarStatus : undefined,
     tags: supportsMethod(discovery, METHODS.listTags) ? tags : undefined,
     onActivateBot: supportsMethod(discovery, METHODS.activateBot) ? (bot) => runSidebarAction(METHODS.activateBot, { payload: bot.id }) : undefined,
-    onArchive: supportsMethod(discovery, METHODS.archiveConversation) ? (item) => runSidebarAction(METHODS.archiveConversation, { payload: item.id }) : undefined,
+    onArchive: supportsMethod(discovery, METHODS.archiveConversation) ? (items) => runSidebarAction(METHODS.archiveConversation, { payload: items.map((item) => item.id) }) : undefined,
     onCreate: supportsMethod(discovery, METHODS.createConversation) ? createConversation : undefined,
     onCreateBot: supportsMethod(discovery, METHODS.createBot) ? (input) => runSidebarAction(METHODS.createBot, input) : undefined,
     onDelete: supportsMethod(discovery, METHODS.deleteConversation) ? (item) => runSidebarAction(METHODS.deleteConversation, { payload: item.id }) : undefined,
@@ -446,7 +451,7 @@ export function WorkspacePage({ connection, globalClient, discovery, models, las
     onRename: supportsMethod(discovery, METHODS.updateConversation) ? (item, title) => runSidebarAction(METHODS.updateConversation, { id: item.id, title }) : undefined,
     onSaveFolderColor: supportsMethod(discovery, METHODS.saveFolderColor) ? (folder, color) => runSidebarAction(METHODS.saveFolderColor, { path: folder.path, color }) : undefined,
     onSaveTags: supportsMethod(discovery, METHODS.saveTags) ? (nextTags) => runSidebarAction(METHODS.saveTags, { tags: nextTags }) : undefined,
-    onSearch: supportsMethod(discovery, METHODS.searchConversations) ? (query) => globalClient.request(METHODS.searchConversations, { payload: query }) : undefined,
+    onSearch: supportsMethod(discovery, METHODS.searchConversations) ? (payload) => globalClient.request(METHODS.searchConversations, { payload }) : undefined,
     onSelect: selectConversation,
     onSetConversationTags: supportsMethod(discovery, METHODS.setConversationTags) ? (item, nextTags) => runSidebarAction(METHODS.setConversationTags, { conversationId: item.id, tags: nextTags }) : undefined,
     onSnoozeBot: supportsMethod(discovery, METHODS.snoozeBot) ? (bot, options) => runSidebarAction(METHODS.snoozeBot, { botId: bot.id, options }) : undefined,

@@ -3,17 +3,12 @@ import { createPortal } from 'preact/compat';
 import { useModalFocus } from '../lib/use-modal-focus.js';
 import { METHODS, supportsMethod } from '../rpc/contracts.js';
 import { moveQueueId, steerQueuedParams } from '../lib/queue-actions.js';
+import { PERMISSION_OPTIONS } from '../lib/permissions.js';
 
 const BUILT_INS = [
   { name: 'stop', description: 'Stop the active run' },
   { name: 'side', description: 'Open a side chat' },
 ];
-const PERMISSIONS = [
-  { id: 'ask_for_approval', label: 'Ask for approval', description: 'Ask before every tool call', icon: 'ri-shield-keyhole-line' },
-  { id: 'approve_for_me', label: 'Approve for me', description: 'Ask only before destructive actions', icon: 'ri-shield-check-line' },
-  { id: 'full_access', label: 'Full access', description: 'Run tool calls without approval', icon: 'ri-shield-flash-line' },
-];
-
 const AUTOSAVE_DEBOUNCE_MS = 300;
 const FILE_SIZE_LIMIT = 10 * 1024 * 1024;
 
@@ -42,10 +37,10 @@ export function Composer({ client, state, models, lastModel, discovery, draftCac
     goal?.status === 'active' && Number.isFinite(resumedAt) ? Math.max(0, goalNow - resumedAt) : 0
   )) / 1000);
   const goalElapsedLabel = [Math.floor(goalElapsedSeconds / 3600), Math.floor((goalElapsedSeconds % 3600) / 60), goalElapsedSeconds % 60].map((part) => String(part).padStart(2, '0')).join(':');
-  const finishedGoalTokens = ['completed', 'blocked', 'cancelled'].includes(goal?.status) ? goal.tokensTransacted ?? 0 : 0;
-  const goalTokenLabel = finishedGoalTokens >= 1_000_000
-    ? `${(finishedGoalTokens / 1_000_000).toFixed(finishedGoalTokens >= 10_000_000 ? 0 : 1)}M`
-    : finishedGoalTokens >= 1_000 ? `${Math.round(finishedGoalTokens / 1_000)}K` : String(finishedGoalTokens);
+  const goalTokens = Number(goal?.tokensTransacted) || 0;
+  const goalTokenLabel = goalTokens >= 1_000_000
+    ? `${(goalTokens / 1_000_000).toFixed(goalTokens >= 10_000_000 ? 0 : 1)}M`
+    : goalTokens >= 1_000 ? `${Math.round(goalTokens / 1_000)}K` : String(goalTokens);
   const localCache = useRef(new Map());
   draftCache ??= localCache.current;
   const [queueOpen, setQueueOpen] = useState(false);
@@ -141,7 +136,7 @@ export function Composer({ client, state, models, lastModel, discovery, draftCac
   const effortSubmenuRef = useRef(null);
   const invocation = useMemo(() => text.match(/(?:^|\s)([@/$])([^\s]*)$/), [text]);
   const selectedModel = models.find((item) => item.id === model);
-  const permission = PERMISSIONS.find((item) => item.id === permissionMode) ?? PERMISSIONS[1];
+  const permission = PERMISSION_OPTIONS.find((item) => item.id === permissionMode) ?? PERMISSION_OPTIONS.find((item) => item.id === 'approve_for_me');
   const contextPercent = state.contextUsage.limit
     ? Math.min(100, Math.round((state.contextUsage.tokens / state.contextUsage.limit) * 100))
     : null;
@@ -500,7 +495,7 @@ export function Composer({ client, state, models, lastModel, discovery, draftCac
         <i class={goal.status === 'completed' ? 'ri-check-line' : goal.status === 'blocked' ? 'ri-shield-question-line' : goal.status === 'cancelled' ? 'ri-close-line' : 'ri-focus-3-line'} aria-hidden="true" />
         <span class="goal-strip-copy">
           <strong title={goal.specification}>{goal.specification}</strong>
-          <small><i class="ri-time-line" aria-hidden="true" /><span>{goalElapsedLabel}</span><span aria-hidden="true">·</span><span>{goalStatus}</span>{finishedGoalTokens > 0 && <><span aria-hidden="true">·</span><span aria-label={`${finishedGoalTokens} tokens`}>{goalTokenLabel}</span></>}</small>
+          <small><i class="ri-time-line" aria-hidden="true" /><span>{goalElapsedLabel}</span><span aria-hidden="true">·</span><span>{goalStatus}</span>{goalTokens > 0 && <><span aria-hidden="true">·</span><span aria-label={`${goalTokens} tokens`}>{goalTokenLabel}</span></>}</small>
         </span>
       </section>}
       {state.tasks.length > 0 && <button type="button" class="composer-strip" onClick={onOpenTasks}><i class="ri-list-check-3" /><span>{state.tasks.filter((task) => task.done).length}/{state.tasks.length} tasks completed</span><i class="ri-arrow-right-s-line" /></button>}
@@ -655,8 +650,8 @@ export function Composer({ client, state, models, lastModel, discovery, draftCac
             <button type="button" role="menuitem" disabled={attachmentsDisabled} onClick={() => { cameraInput.current?.click(); setOpenMenu(null); }}><i class="ri-camera-line" />Take photo</button>
             <button type="button" role="menuitem" disabled={attachmentsDisabled} onClick={() => { videoInput.current?.click(); setOpenMenu(null); }}><i class="ri-video-line" />Record video</button>
             {canRecordAudio && <button type="button" role="menuitem" disabled={attachmentsDisabled} onClick={() => { setOpenMenu(null); root.current?.querySelector('textarea')?.blur(); setAudioOpen(true); }}><i class="ri-mic-line" />Record audio</button>}
-          </>}<button type="button" role="menuitemcheckbox" aria-checked={ultraMode} onClick={() => { setUltraMode(!ultraMode); setWorkMode(null); setOpenMenu(null); }}><i class="ri-flashlight-line" />Ultra</button><button type="button" role="menuitemcheckbox" aria-checked={workMode === 'goal'} onClick={() => { setWorkMode(workMode === 'goal' ? null : 'goal'); setUltraMode(false); setOpenMenu(null); }}><i class="ri-focus-3-line" />Goal</button><button type="button" role="menuitemcheckbox" aria-checked={workMode === 'plan'} onClick={() => { setWorkMode(workMode === 'plan' ? null : 'plan'); setUltraMode(false); setOpenMenu(null); }}><i class="ri-list-check-3" />Plan</button><button type="button" role="menuitem" disabled={!supportsMethod(discovery, METHODS.createSideChat)} onClick={() => { setOpenMenu(null); Promise.resolve().then(onSideChat).catch(onError); }}><i class="ri-chat-new-line" />Side chat</button><span class="mobile-permission-label">Permission</span><div class="mobile-permission-options">{PERMISSIONS.map((item) => <button key={item.id} type="button" role="menuitemradio" aria-checked={item.id === permissionMode} onClick={() => { setPermissionMode(item.id); setOpenMenu(null); }}><i class={item.icon} /><span><strong>{item.label}</strong><small>{item.description}</small></span></button>)}</div></div>}</div>
-          <div class="composer-menu-holder permission-control"><button type="button" class="control-chip" aria-haspopup="menu" aria-expanded={openMenu === 'permission'} onClick={() => setOpenMenu(openMenu === 'permission' ? null : 'permission')}><i class={permission.icon} /><span>{permission.label}</span><i class="ri-arrow-down-s-line" /></button>{openMenu === 'permission' && <div class="composer-menu permission-menu" role="menu">{PERMISSIONS.map((item) => <button key={item.id} type="button" role="menuitemradio" aria-checked={item.id === permissionMode} onClick={() => { setPermissionMode(item.id); setOpenMenu(null); }}><i class={item.icon} /><span><strong>{item.label}</strong><small>{item.description}</small></span></button>)}</div>}</div>
+          </>}<button type="button" role="menuitemcheckbox" aria-checked={ultraMode} onClick={() => { setUltraMode(!ultraMode); setWorkMode(null); setOpenMenu(null); }}><i class="ri-flashlight-line" />Ultra</button><button type="button" role="menuitemcheckbox" aria-checked={workMode === 'goal'} onClick={() => { setWorkMode(workMode === 'goal' ? null : 'goal'); setUltraMode(false); setOpenMenu(null); }}><i class="ri-focus-3-line" />Goal</button><button type="button" role="menuitemcheckbox" aria-checked={workMode === 'plan'} onClick={() => { setWorkMode(workMode === 'plan' ? null : 'plan'); setUltraMode(false); setOpenMenu(null); }}><i class="ri-list-check-3" />Plan</button><button type="button" role="menuitem" disabled={!supportsMethod(discovery, METHODS.createSideChat)} onClick={() => { setOpenMenu(null); Promise.resolve().then(onSideChat).catch(onError); }}><i class="ri-chat-new-line" />Side chat</button><span class="mobile-permission-label">Permission</span><div class="mobile-permission-options">{PERMISSION_OPTIONS.map((item) => <button key={item.id} type="button" role="menuitemradio" aria-checked={item.id === permissionMode} onClick={() => { setPermissionMode(item.id); setOpenMenu(null); }}><i class={item.icon} /><span><strong>{item.label}</strong><small>{item.description}</small></span></button>)}</div></div>}</div>
+          <div class="composer-menu-holder permission-control"><button type="button" class="control-chip" aria-haspopup="menu" aria-expanded={openMenu === 'permission'} onClick={() => setOpenMenu(openMenu === 'permission' ? null : 'permission')}><i class={permission.icon} /><span>{permission.label}</span><i class="ri-arrow-down-s-line" /></button>{openMenu === 'permission' && <div class="composer-menu permission-menu" role="menu">{PERMISSION_OPTIONS.map((item) => <button key={item.id} type="button" role="menuitemradio" aria-checked={item.id === permissionMode} onClick={() => { setPermissionMode(item.id); setOpenMenu(null); }}><i class={item.icon} /><span><strong>{item.label}</strong><small>{item.description}</small></span></button>)}</div>}</div>
           {workMode && <button type="button" class="mode-chip" onClick={() => setWorkMode(null)}><i class={workMode === 'goal' ? 'ri-focus-3-line' : 'ri-list-check-3'} />{workMode === 'goal' ? 'Goal' : 'Plan'}<i class="ri-close-line" /></button>}
           {ultraMode && <button type="button" class="mode-chip" onClick={() => setUltraMode(false)}><i class="ri-flashlight-line" />Ultra<i class="ri-close-line" /></button>}
         </div>

@@ -57,7 +57,7 @@ describe('sidebar Desktop parity', () => {
       schedulerSnooze: { active: false, mode: null, until: null },
       selectedId: 'working',
       onActivateBot: (bot) => calls.push(['activate', bot.id]),
-      onArchive: (item) => calls.push(['archive', item.id]),
+      onArchive: (items) => calls.push(['archive', items.map((item) => item.id)]),
       onCreate() {},
       onCreateBot: (input) => calls.push(['create-bot', input]),
       onDelete: (item) => calls.push(['delete', item.id]),
@@ -132,5 +132,37 @@ describe('sidebar Desktop parity', () => {
     act(() => botTrigger.click());
     act(() => buttonWithText(document.body.querySelector('[role="menu"][aria-label="Actions for Release bot"]'), 'Activate now').click());
     expect(calls).toContainEqual(['activate', 'bot-1']);
+  });
+
+  test('archives every thread in the Working group after confirmation', async () => {
+    const calls = [];
+    root = document.createElement('div');
+    document.body.append(root);
+    act(() => render(h(ConversationSidebar, {
+      collapsed: false,
+      connection: { label: 'Test Avi' },
+      conversations: [
+        { id: 'w1', title: 'Running thread', updatedAt: '2026-09-01T12:00:00Z' },
+        { id: 'w2', title: 'Blocked thread', workStatus: 'blocked', updatedAt: '2026-09-01T11:00:00Z' },
+      ],
+      folders: [],
+      bots: [],
+      tags: [],
+      sidebarStatus: { runningConversationIds: ['w1'] },
+      schedulerSnooze: { active: false, mode: null, until: null },
+      selectedId: 'w1',
+      onArchive: (items) => { calls.push(['archive', items.map((item) => item.id)]); return Promise.resolve(); },
+      onCreate() {},
+      onExit() {},
+      onSelect() {},
+    }), root));
+
+    act(() => root.querySelector('[aria-label="Archive all in Working"]').click());
+    expect(root.querySelector('.prompt-form').textContent).toContain('Archive 2 chats');
+    act(() => buttonWithText(root.querySelector('.prompt-form'), 'Archive all').click());
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
+    expect(calls).toEqual([['archive', ['w1', 'w2']]]);
+    expect(root.querySelector('.prompt-form')).toBeNull();
+    expect(root.querySelector('.sidebar-feedback').textContent).toContain('archived');
   });
 });

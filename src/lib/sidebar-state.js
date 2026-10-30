@@ -47,10 +47,18 @@ function sortByUpdatedAt(conversations) {
   return [...conversations].sort((left, right) => updatedTime(right) - updatedTime(left));
 }
 
-export function filterSidebarConversations(conversations, { activeTagIds = [], showAgentCreatedThreads = false } = {}) {
+export function filterSidebarConversations(conversations, { activeTagIds = [], showAgentCreatedThreads = false, snapshot = {} } = {}) {
   const selected = selectedTagIds(activeTagIds);
+  const normalizedSnapshot = normalizeSidebarSnapshot(snapshot);
   return (Array.isArray(conversations) ? conversations : []).filter((conversation) => (
-    (showAgentCreatedThreads || conversation?.createdBy !== 'agent')
+    (
+      showAgentCreatedThreads
+      || conversation?.createdBy !== 'agent'
+      || hasConversationEntry(normalizedSnapshot.approvalPending, conversation?.id)
+      || hasConversationEntry(normalizedSnapshot.inputPending, conversation?.id)
+      || conversation?.workStatus === 'blocked'
+      || (conversation?.needsAttention && !hasConversationEntry(normalizedSnapshot.running, conversation?.id))
+    )
     && (!selected.size || (conversation?.tags ?? []).some((tagId) => selected.has(tagId)))
   ));
 }
@@ -78,7 +86,7 @@ export function deriveConversationStatus(conversation, snapshot = {}) {
 
 export function deriveTaskGroups(conversations, snapshot = {}, filters = {}) {
   const normalizedSnapshot = normalizeSidebarSnapshot(snapshot);
-  const sorted = sortByUpdatedAt(filterSidebarConversations(conversations, filters));
+  const sorted = sortByUpdatedAt(filterSidebarConversations(conversations, { ...filters, snapshot: normalizedSnapshot }));
   const working = sorted.filter((conversation) => ['approval', 'input', 'semaphore', 'working', 'blocked', 'attention'].includes(
     deriveConversationStatus(conversation, normalizedSnapshot).state,
   ));
@@ -130,7 +138,7 @@ export function normalizeSearchResults(results) {
 
 export function deriveSidebarState({ conversations = [], bots = [], tags = [], snapshot = {}, activeTagIds = [], showAgentCreatedThreads = false, searchResults = [] } = {}) {
   const filters = { activeTagIds, showAgentCreatedThreads };
-  const visibleConversations = sortByUpdatedAt(filterSidebarConversations(conversations, filters));
+  const visibleConversations = sortByUpdatedAt(filterSidebarConversations(conversations, { ...filters, snapshot }));
   const taskGroups = deriveTaskGroups(conversations, snapshot, filters);
   return {
     conversations: visibleConversations,

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { normalizeSearchResults } from '../lib/sidebar-state.js';
+import { BOT_PERMISSIONS } from '../lib/permissions.js';
 import { useModalFocus } from '../lib/use-modal-focus.js';
 
 const TAG_COLORS = Object.freeze(['#e5484d', '#f76b15', '#e3b341', '#46a758', '#12a594', '#3e9df0', '#3e63dd', '#8e4ec6', '#d6409f', '#8b8d98']);
@@ -56,17 +57,10 @@ export function SidebarSearchDialog({ onSearch, onSelect, onClose }) {
   const tokenRef = useRef(0);
 
   function searchNow() {
-    const trimmed = query.trim();
-    if (!trimmed) {
-      setResults([]);
-      setSearching(false);
-      setError('');
-      return;
-    }
     const token = ++tokenRef.current;
     setSearching(true);
     setError('');
-    Promise.resolve(onSearch(trimmed)).then((found) => {
+    Promise.resolve(onSearch({ query: query.trim() })).then((found) => {
       if (token !== tokenRef.current) return;
       setResults(normalizeSearchResults(found));
       setSelected(0);
@@ -131,7 +125,7 @@ export function SidebarSearchDialog({ onSearch, onSelect, onClose }) {
         />
         {searching ? <i class="ri-loader-4-line spinning" role="status" aria-label="Searching" /> : <kbd>Esc</kbd>}
       </label>
-      {query.trim() && (error && !searching ? (
+      {error && !searching ? (
         <div class="search-error" role="alert">
           <i class="ri-error-warning-line" aria-hidden="true" />
           <span>Could not search: {error}</span>
@@ -139,7 +133,7 @@ export function SidebarSearchDialog({ onSearch, onSelect, onClose }) {
         </div>
       ) : (
         <div ref={resultsRef} id="sidebar-search-results" class="search-results" role="listbox" aria-label="Chat search results">
-          {!searching && results.length > 0 && <div class="search-results-label">Results<span>{results.length}</span></div>}
+          {!searching && results.length > 0 && <div class="search-results-label">{query.trim() ? 'Results' : 'Recent chats'}<span>{results.length}</span></div>}
           {results.map((result, index) => (
             <button
               key={result.conversationId}
@@ -164,10 +158,10 @@ export function SidebarSearchDialog({ onSearch, onSelect, onClose }) {
             </button>
           ))}
           {!searching && results.length === 0 && (
-            <div class="search-empty"><i class="ri-search-line" aria-hidden="true" /><span>No chats found for that query.</span></div>
+            <div class="search-empty"><i class="ri-search-line" aria-hidden="true" /><span>{query.trim() ? 'No chats found for that query.' : 'No chats yet.'}</span></div>
           )}
         </div>
-      ))}
+      )}
     </DialogShell>
   );
 }
@@ -231,13 +225,14 @@ export function SidebarBotDialog({ bot = null, models = [], folders = [], busy =
   const [name, setName] = useState(bot?.name ?? '');
   const [model, setModel] = useState(bot?.model ?? models[0]?.id ?? '');
   const [workingFolder, setWorkingFolder] = useState(bot?.workingFolder ?? '');
+  const [permissionMode, setPermissionMode] = useState(BOT_PERMISSIONS.some((option) => option.id === bot?.permissionMode) ? bot.permissionMode : 'approve_for_me');
   const [enabled, setEnabled] = useState(bot?.enabled ?? true);
   const nameInputRef = useRef(null);
 
   function submit(event) {
     event.preventDefault();
     if (busy || !name.trim()) return;
-    onSubmit({ name: name.trim(), model, workingFolder: workingFolder || null, enabled });
+    onSubmit({ name: name.trim(), model, workingFolder: workingFolder || null, permissionMode, enabled });
   }
 
   return (
@@ -255,6 +250,11 @@ export function SidebarBotDialog({ bot = null, models = [], folders = [], busy =
           <select value={workingFolder} onChange={(event) => setWorkingFolder(event.currentTarget.value)}>
             <option value="">Default working folder</option>
             {folders.map((folder) => <option key={folder.path} value={folder.path}>{folder.displayPath ?? folder.path}</option>)}
+          </select>
+        </label>
+        <label>Tool permissions
+          <select value={permissionMode} onChange={(event) => setPermissionMode(event.currentTarget.value)}>
+            {BOT_PERMISSIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
           </select>
         </label>
         <label class="check">

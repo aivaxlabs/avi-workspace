@@ -28,6 +28,7 @@ export const METHODS = Object.freeze({
   models: 'models:list',
   conversationContext: 'conversations:context',
   conversationMessages: 'conversations:messages',
+  chatStatistics: 'chat:statistics',
   toolCallDetails: 'conversations:tool-call-details',
   composerGet: 'composer-state:get',
   composerSave: 'composer-state:save',

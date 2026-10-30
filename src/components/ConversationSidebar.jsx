@@ -196,8 +196,8 @@ export function ConversationSidebar({
     };
   }, [menu]);
 
-  const filters = useMemo(() => ({ activeTagIds, showAgentCreatedThreads: showAgentCreated }), [activeTagIds, showAgentCreated]);
   const snapshot = useMemo(() => normalizeSidebarSnapshot(sidebarStatus), [sidebarStatus]);
+  const filters = useMemo(() => ({ activeTagIds, showAgentCreatedThreads: showAgentCreated, snapshot }), [activeTagIds, showAgentCreated, snapshot]);
   const visibleConversations = useMemo(() => filterSidebarConversations(conversations, filters), [conversations, filters]);
   const navigation = useMemo(() => buildFolderNavigation(folders, visibleConversations), [folders, visibleConversations]);
   const taskGroups = useMemo(() => deriveTaskGroups(visibleConversations, snapshot, filters), [visibleConversations, snapshot, filters]);
@@ -255,12 +255,13 @@ export function ConversationSidebar({
   function pendingDialogProps(action) {
     if (action.kind === 'rename') return { title: 'Rename conversation', inputLabel: 'Conversation name', initialValue: action.item.title ?? '', placeholder: 'Conversation name', confirmLabel: 'Rename' };
     if (action.kind === 'delete-chat') return { title: 'Delete chat', description: `Delete chat "${action.item.title || 'New chat'}"? This cannot be undone.`, confirmLabel: 'Delete chat', danger: true };
+    if (action.kind === 'archive-all') return { title: `Archive all in ${action.title}`, description: `Archive ${action.items.length} ${action.items.length === 1 ? 'chat' : 'chats'} in "${action.title}"? Active runs stop and the chats leave this list.`, confirmLabel: 'Archive all', danger: true };
     return { title: 'Delete bot', description: `Delete bot "${action.item.name}"? This cannot be undone.`, confirmLabel: 'Delete bot', danger: true };
   }
 
   async function confirmPendingAction(value) {
     if (!pendingAction || pendingBusy) return;
-    const { kind, item } = pendingAction;
+    const { kind, item, items } = pendingAction;
     setPendingBusy(true);
     setPendingError('');
     try {
@@ -270,6 +271,9 @@ export function ConversationSidebar({
       } else if (kind === 'delete-chat') {
         await onDelete?.(item);
         showFeedback('Chat deleted.');
+      } else if (kind === 'archive-all') {
+        await onArchive?.(items);
+        showFeedback('Chats archived.');
       } else {
         await onDeleteBot?.(item);
         showFeedback('Bot deleted.');
@@ -360,6 +364,15 @@ export function ConversationSidebar({
       <section class={`task-group ${spin ? 'working-group' : 'review-group'}`} key={key}>
         <div class="sidebar-section-header">
           <strong><span>{title}</span><small>{items.length}</small></strong>
+          {onArchive && items.length > 0 && (
+            <button
+              type="button"
+              class="section-action"
+              aria-label={`Archive all in ${title}`}
+              title={`Archive all in ${title}`}
+              onClick={() => setPendingAction({ kind: 'archive-all', items, title })}
+            ><i class="ri-archive-line" /></button>
+          )}
         </div>
         <ul class="thread-list compact">
           {visibleItems.map((item) => {
@@ -466,7 +479,7 @@ export function ConversationSidebar({
           : <div class="menu-empty">No tags yet</div>)}
         {onSaveTags && <MenuItem icon="ri-settings-3-line" onClick={() => { setMenu(null); setTagsDialogOpen(true); }}>Manage tags...</MenuItem>}
         {(onArchive || onDelete) && <MenuDivider />}
-        {onArchive && <MenuItem icon="ri-archive-line" onClick={() => { setMenu(null); runMenuAction(() => onArchive(item)); }}>Archive chat</MenuItem>}
+        {onArchive && <MenuItem icon="ri-archive-line" onClick={() => { setMenu(null); runMenuAction(() => onArchive([item])); }}>Archive chat</MenuItem>}}
         {onDelete && <MenuItem icon="ri-delete-bin-line" danger onClick={() => { setMenu(null); setPendingAction({ kind: 'delete-chat', item }); }}>Delete chat</MenuItem>}
       </>
     );
